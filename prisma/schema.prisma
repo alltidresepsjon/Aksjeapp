@@ -1,0 +1,242 @@
+// Børsliga — datamodell
+//
+// Penger lagres alltid som Decimal (Postgres NUMERIC), aldri float, for å
+// unngå avrundingsfeil. Antall aksjer er alltid heltall (Int) — kun hele
+// aksjer kan handles.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Brukere og autentisering
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ownedLeagues      League[]           @relation("LeagueOwner")
+  leagueMemberships LeagueMembership[]
+  accounts          Account[]
+
+  @@map("users")
+}
+
+// Autentisering bruker JWT-baserte sesjoner (Auth.js Credentials-provider,
+// se src/auth.ts) — ingen database-sesjonstabell er nødvendig.
+
+// ---------------------------------------------------------------------------
+// Ligaer og sesonger
+// ---------------------------------------------------------------------------
+
+model League {
+  id         String   @id @default(cuid())
+  name       String
+  inviteCode String   @unique
+  ownerId    String
+  owner      User     @relation("LeagueOwner", fields: [ownerId], references: [id])
+  createdAt  DateTime @default(now())
+
+  memberships LeagueMembership[]
+  seasons     Season[]
+
+  @@map("leagues")
+}
+
+model LeagueMembership {
+  id       String   @id @default(cuid())
+  userId   String
+  leagueId String
+  joinedAt DateTime @default(now())
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, leagueId])
+  @@map("league_memberships")
+}
+
+model Season {
+  id                   String   @id @default(cuid())
+  leagueId             String
+  seasonNumber         Int
+  // Påmelding må skje før dette tidspunktet (og før sesongstart).
+  registrationDeadline DateTime
+  startsAt             DateTime
+  endsAt               DateTime
+  startingCash         Decimal  @db.Decimal(18, 4)
+  createdAt            DateTime @default(now())
+
+  league   League    @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  accounts Account[]
+
+  @@unique([leagueId, seasonNumber])
+  @@map("seasons")
+}
+
+// ---------------------------------------------------------------------------
+// Kontoer (portefølje) — én per bruker per sesong (konkurranse), eller én
+// separat øvingskonto per bruker (seasonId = null).
+// ---------------------------------------------------------------------------
+
+model Account {
+  id          String   @id @default(cuid())
+  userId      String
+  // null = øvingskonto (adskilt fra konkurransekontoer)
+  seasonId    String?
+  cashBalance Decimal  @db.Decimal(18, 4)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  season   Season?           @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  holdings Holding[]
+  orders   Order[]
+  ledger   CashLedgerEntry[]
+
+  // Merk: en delvis unik indeks (kun én øvingskonto per bruker der
+  // season_id IS NULL) legges til i migrasjonen med rå SQL, se
+  // migration.sql — Prisma sitt schema-språk støtter ikke partial unique
+  // indexes på tvers av alle databaser.
+  @@unique([userId, seasonId])
+  @@map("accounts")
+}
+
+// ---------------------------------------------------------------------------
+// Aksjer og kursdata
+// ---------------------------------------------------------------------------
+
+model Stock {
+  id        String   @id @default(cuid())
+  ticker    String   @unique
+  name      String
+  currency  String   @default("NOK")
+  createdAt DateTime @default(now())
+
+  priceTicks PriceTick[]
+  holdings   Holding[]
+  orders     Order[]
+
+  @@map("stocks")
+}
+
+// En prisobservasjon. `observedAt` er markedsdatatidspunktet (når kursen
+// faktisk gjaldt), `receivedAt` er når serveren mottok/publiserte
+// observasjonen. De to kan avvike ved forsinkede data.
+model PriceTick {
+  id         String   @id @default(cuid())
+  stockId    String
+  price      Decimal  @db.Decimal(18, 4)
+  observedAt DateTime
+  receivedAt DateTime
+  createdAt  DateTime @default(now())
+
+  stock Stock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  @@unique([stockId, observedAt])
+  @@index([stockId, observedAt])
+  @@map("price_ticks")
+}
+
+// ---------------------------------------------------------------------------
+// Beholdninger og ordre
+// ---------------------------------------------------------------------------
+
+model Holding {
+  id        String   @id @default(cuid())
+  accountId String
+  stockId   String
+  quantity  Int
+  // Gjennomsnittlig kostpris per aksje (inkl. kurtasje), brukt til avkastningsvisning per post.
+  avgCost   Decimal  @db.Decimal(18, 4)
+  updatedAt DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stock   Stock   @relation(fields: [stockId], references: [id])
+
+  @@unique([accountId, stockId])
+  @@map("holdings")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING
+  FILLED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+model Order {
+  id        String      @id @default(cuid())
+  accountId String
+  stockId   String
+  side      OrderSide
+  quantity  Int
+  status    OrderStatus @default(PENDING)
+
+  // Idempotensnøkkel fra klienten — forhindrer doble ordre ved
+  // gjentatte/parallelle forespørsler (f.eks. dobbelttrykk).
+  idempotencyKey String
+
+  // Serverens mottakstidspunkt for ordren. Ordren kan aldri fylles til en
+  // prisobservasjon med observedAt <= requestedAt.
+  requestedAt DateTime @default(now())
+
+  filledAt            DateTime?
+  fillPrice           Decimal?  @db.Decimal(18, 4)
+  // Markedsdatatidspunktet til prisobservasjonen ordren ble fylt mot.
+  fillPriceObservedAt DateTime?
+  feeAmount           Decimal?  @db.Decimal(18, 4)
+  totalAmount         Decimal?  @db.Decimal(18, 4)
+  rejectionReason     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account     Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  stock       Stock            @relation(fields: [stockId], references: [id])
+  ledgerEntry CashLedgerEntry?
+
+  @@unique([accountId, idempotencyKey])
+  @@index([accountId, status])
+  @@map("orders")
+}
+
+enum LedgerEntryType {
+  INITIAL_DEPOSIT
+  TRADE_BUY
+  TRADE_SELL
+}
+
+// Revisjonslogg over alle kontantbevegelser — brukes til å verifisere at
+// ingen penger oppstår eller forsvinner (sum av bevegelser == saldo).
+model CashLedgerEntry {
+  id           String          @id @default(cuid())
+  accountId    String
+  orderId      String?         @unique
+  type         LedgerEntryType
+  // Signert beløp (positivt = innskudd/salg, negativt = kjøp)
+  amount       Decimal         @db.Decimal(18, 4)
+  balanceAfter Decimal         @db.Decimal(18, 4)
+  createdAt    DateTime        @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  @@map("cash_ledger_entries")
+}
