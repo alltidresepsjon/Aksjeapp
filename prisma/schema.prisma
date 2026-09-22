@@ -1,0 +1,295 @@
+// Aksjeanalyse — datamodell for etappe 1 (app, database, innlogging,
+// resultatkalender med merkede demodata).
+//
+// Denne migrasjonen dekker BEVISST ikke beslutningsjournal,
+// strategiversjonering eller nyhetsinnhenting ennå — de kommer som egne
+// migrasjoner i senere etapper når funksjonaliteten faktisk bygges, ikke
+// som forhåndsbygd, ubrukt skjema nå.
+//
+// Penger lagres alltid som Decimal (Postgres NUMERIC), aldri float.
+// Alle tidspunkter lagres i UTC (Postgres TIMESTAMPTZ); visning i
+// Europe/Oslo skjer i applikasjonslaget.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Brukere (privat plattform — ingen åpen registrering; se ALLOWED_EMAILS)
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts Account[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Kontoer — én per (bruker, modus). DEMO og PAPER opprettes automatisk.
+// LIVE_READONLY er reservert for en senere, eksplisitt avklart utvidelse og
+// har ingen kontantsaldo/handelslogikk i denne versjonen.
+// ---------------------------------------------------------------------------
+
+enum AccountMode {
+  DEMO
+  PAPER
+  LIVE_READONLY
+}
+
+model Account {
+  id              String      @id @default(cuid())
+  userId          String
+  mode            AccountMode
+  baseCurrency    String      @default("NOK")
+  startingCapital Decimal     @db.Decimal(18, 4)
+  cashBalance     Decimal     @db.Decimal(18, 4)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positions Position[]
+  orders    Order[]
+  ledger    CashLedgerEntry[]
+  snapshots DailySnapshot[]
+
+  @@unique([userId, mode])
+  @@map("accounts")
+}
+
+// ---------------------------------------------------------------------------
+// Instrumenter og prisdata
+// ---------------------------------------------------------------------------
+
+model Instrument {
+  id        String   @id @default(cuid())
+  ticker    String
+  name      String
+  exchange  String // f.eks. "OSE" (Oslo Børs), "DEMO"
+  currency  String
+  sector    String?
+  createdAt DateTime @default(now())
+
+  priceObservations PriceObservation[]
+  positions         Position[]
+  orders            Order[]
+
+  @@unique([ticker, exchange])
+  @@map("instruments")
+}
+
+// Prisobservasjon. `observedAt` er markedsdatatidspunktet, `receivedAt` er
+// når systemet mottok observasjonen — samme prinsipp som i tidligere
+// leveranser, avgjørende for å aldri fylle simulerte ordre til en kjent
+// gammel kurs.
+model PriceObservation {
+  id           String   @id @default(cuid())
+  instrumentId String
+  price        Decimal  @db.Decimal(18, 4)
+  source       String // f.eks. "demo-syntetisk", senere en navngitt leverandør
+  observedAt   DateTime
+  receivedAt   DateTime
+  createdAt    DateTime @default(now())
+
+  instrument Instrument @relation(fields: [instrumentId], references: [id], onDelete: Cascade)
+
+  @@unique([instrumentId, observedAt])
+  @@index([instrumentId, observedAt])
+  @@map("price_observations")
+}
+
+// Referanseindeks (f.eks. en syntetisk demo-indeks i etappe 1, en reell
+// indeks som OSEBX/S&P 500 senere).
+model BenchmarkObservation {
+  id           String   @id @default(cuid())
+  benchmarkKey String // f.eks. "DEMO_INDEX"
+  value        Decimal  @db.Decimal(18, 6)
+  observedAt   DateTime
+  receivedAt   DateTime
+  createdAt    DateTime @default(now())
+
+  @@unique([benchmarkKey, observedAt])
+  @@index([benchmarkKey, observedAt])
+  @@map("benchmark_observations")
+}
+
+// ---------------------------------------------------------------------------
+// Posisjoner og ordre
+// ---------------------------------------------------------------------------
+
+model Position {
+  id           String   @id @default(cuid())
+  accountId    String
+  instrumentId String
+  quantity     Int
+  avgCost      Decimal  @db.Decimal(18, 4)
+  updatedAt    DateTime @updatedAt
+
+  account    Account    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  instrument Instrument @relation(fields: [instrumentId], references: [id])
+
+  @@unique([accountId, instrumentId])
+  @@map("positions")
+}
+
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING
+  FILLED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+model Order {
+  id           String      @id @default(cuid())
+  accountId    String
+  instrumentId String
+  side         OrderSide
+  quantity     Int
+  status       OrderStatus @default(PENDING)
+
+  idempotencyKey String
+
+  requestedAt         DateTime  @default(now())
+  filledAt            DateTime?
+  fillPrice           Decimal?  @db.Decimal(18, 4)
+  fillPriceObservedAt DateTime?
+  feeAmount           Decimal?  @db.Decimal(18, 4)
+  slippageAmount      Decimal?  @db.Decimal(18, 4)
+  totalAmount         Decimal?  @db.Decimal(18, 4)
+  rejectionReason     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account     Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  instrument  Instrument       @relation(fields: [instrumentId], references: [id])
+  ledgerEntry CashLedgerEntry?
+
+  @@unique([accountId, idempotencyKey])
+  @@index([accountId, status])
+  @@map("orders")
+}
+
+enum LedgerEntryType {
+  DEPOSIT
+  WITHDRAWAL
+  TRADE_BUY
+  TRADE_SELL
+  DIVIDEND
+  FEE_ADJUSTMENT
+}
+
+// Revisjonslogg over alle kontantbevegelser. Innskudd/uttak lagres HER,
+// adskilt fra handelsresultat, slik at dagsresultatet kan justeres korrekt
+// for kapitalbevegelser og ikke feiltolkes som avkastning.
+model CashLedgerEntry {
+  id           String          @id @default(cuid())
+  accountId    String
+  orderId      String?         @unique
+  type         LedgerEntryType
+  amount       Decimal         @db.Decimal(18, 4) // signert: positivt = inn, negativt = ut
+  balanceAfter Decimal         @db.Decimal(18, 4)
+  note         String?
+  createdAt    DateTime        @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  order   Order?  @relation(fields: [orderId], references: [id])
+
+  @@map("cash_ledger_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Daglige porteføljesnapshots — grunnlaget for resultatkalenderen.
+// Beregnes av deterministisk kode (regnskapsmotoren), aldri av en språkmodell.
+// ---------------------------------------------------------------------------
+
+model DailySnapshot {
+  id          String   @id @default(cuid())
+  accountId   String
+  // Handelsdagen i Europe/Oslo, lagret som en ren dato (ingen klokkeslett).
+  tradingDate DateTime @db.Date
+
+  startValue          Decimal @db.Decimal(18, 4)
+  endValue            Decimal @db.Decimal(18, 4)
+  netDeposits         Decimal @db.Decimal(18, 4) // innskudd - uttak denne dagen
+  realizedPnl         Decimal @db.Decimal(18, 4)
+  unrealizedPnlChange Decimal @db.Decimal(18, 4)
+  costs               Decimal @db.Decimal(18, 4) // kurtasje + slippage denne dagen
+  fxImpact            Decimal @default(0) @db.Decimal(18, 4)
+  dayResult           Decimal @db.Decimal(18, 4) // endValue - startValue - netDeposits
+  tradeCount          Int     @default(0)
+
+  benchmarkStartValue Decimal? @db.Decimal(18, 6)
+  benchmarkEndValue   Decimal? @db.Decimal(18, 6)
+
+  // Markedet var stengt denne dagen (helg/helligdag) — ikke det samme som
+  // manglende data.
+  marketClosed   Boolean @default(false)
+  // Vi manglet prisdata for én eller flere posisjoner ved beregning —
+  // resultatet er et anslag, skal markeres tydelig i UI, ikke skjules.
+  dataIncomplete Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, tradingDate])
+  @@index([accountId, tradingDate])
+  @@map("daily_snapshots")
+}
+
+// ---------------------------------------------------------------------------
+// Systemhendelser — driftsproblemer, dataproblemer, regelbrudd. Grunnlag for
+// statusvisning ("siste vellykkede oppdatering") og daglige rapporter senere.
+// ---------------------------------------------------------------------------
+
+enum SystemEventLevel {
+  INFO
+  WARNING
+  ERROR
+}
+
+model SystemEvent {
+  id          String           @id @default(cuid())
+  level       SystemEventLevel
+  category    String // f.eks. "market_data", "snapshot_job", "auth"
+  message     String
+  contextJson Json?
+  createdAt   DateTime         @default(now())
+
+  @@index([category, createdAt])
+  @@map("system_events")
+}
+
+// ---------------------------------------------------------------------------
+// Nødstopp. Én rad, satt av et menneske via UI/API — ALDRI av en
+// språkmodell. `placeOrder` sjekker denne FØR noe annet og nekter all
+// handel når den er satt, uavhengig av kontomodus.
+// ---------------------------------------------------------------------------
+
+model SystemSetting {
+  key         String   @id
+  value       String
+  updatedAt   DateTime @updatedAt
+  updatedById String?
+
+  @@map("system_settings")
+}
