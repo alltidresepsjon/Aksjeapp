@@ -23,18 +23,39 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().default(""),
 });
 
-// Parses once, server-only. Never import from a "use client" component.
-export const env = envSchema.parse({
-  DATABASE_URL: process.env.DATABASE_URL,
-  AUTH_SECRET: process.env.AUTH_SECRET,
-  ALLOWED_EMAILS: process.env.ALLOWED_EMAILS,
-  DEMO_MARKET_SEED: process.env.DEMO_MARKET_SEED,
-  BASE_CURRENCY: process.env.BASE_CURRENCY,
-  STARTING_CAPITAL: process.env.STARTING_CAPITAL,
-  BROKERAGE_FLAT_FEE: process.env.BROKERAGE_FLAT_FEE,
-  BROKERAGE_PERCENT_FEE: process.env.BROKERAGE_PERCENT_FEE,
-  SLIPPAGE_PERCENT: process.env.SLIPPAGE_PERCENT,
-  MONTHLY_AI_BUDGET_NOK: process.env.MONTHLY_AI_BUDGET_NOK,
-  MONTHLY_DATA_BUDGET_NOK: process.env.MONTHLY_DATA_BUDGET_NOK,
-  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+type Env = z.infer<typeof envSchema>;
+
+let cached: Env | undefined;
+
+function parseEnv(): Env {
+  if (!cached) {
+    cached = envSchema.parse({
+      DATABASE_URL: process.env.DATABASE_URL,
+      AUTH_SECRET: process.env.AUTH_SECRET,
+      ALLOWED_EMAILS: process.env.ALLOWED_EMAILS,
+      DEMO_MARKET_SEED: process.env.DEMO_MARKET_SEED,
+      BASE_CURRENCY: process.env.BASE_CURRENCY,
+      STARTING_CAPITAL: process.env.STARTING_CAPITAL,
+      BROKERAGE_FLAT_FEE: process.env.BROKERAGE_FLAT_FEE,
+      BROKERAGE_PERCENT_FEE: process.env.BROKERAGE_PERCENT_FEE,
+      SLIPPAGE_PERCENT: process.env.SLIPPAGE_PERCENT,
+      MONTHLY_AI_BUDGET_NOK: process.env.MONTHLY_AI_BUDGET_NOK,
+      MONTHLY_DATA_BUDGET_NOK: process.env.MONTHLY_DATA_BUDGET_NOK,
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    });
+  }
+  return cached;
+}
+
+// Validerer FØRST GANG en variabel faktisk leses, ikke idet modulen
+// importeres. Next.js sin build-fase ("Collecting page data") importerer
+// hver rute for å inspisere den, uten å faktisk kjøre handleren — en
+// build-container uten miljøvariabler satt (vanlig på f.eks. Railway, der
+// variabler kan være tilgjengelige først ved kjøretid) skal derfor aldri
+// kunne felle selve bygget. Server-only — importer aldri fra en
+// "use client"-komponent.
+export const env: Env = new Proxy({} as Env, {
+  get(_target, prop) {
+    return parseEnv()[prop as keyof Env];
+  },
 });
