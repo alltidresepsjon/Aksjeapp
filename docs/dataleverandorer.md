@@ -99,6 +99,53 @@ forsiktighetsprinsipp:
 - Markedspriser skal alltid komme fra selve datakilden — **aldri fra
   AI-generert tekst**.
 
+## Valg av leverandør: Saxo Bank OpenAPI (anbefalt, ikke endelig avklart)
+
+Etter research 22.9.2026 anbefales **Saxo Bank OpenAPI** som første kandidat
+for både markedsdata og fremtidig ordreutførelse. Alternativene vurdert:
+
+| Leverandør | Data (Oslo Børs) | Ordre-API for automatisert handel | Arkitekturpasning |
+|---|---|---|---|
+| **Saxo Bank OpenAPI** | Ja, del av 30 000+ instrumenter | Ja — REST/OAuth, egen SIM-modus for testing | Stateless REST passer direkte med Next.js/Railway, ingen ekstra prosess |
+| **Interactive Brokers** | Ja, bekreftet (0,05 % kurtasje, min. NOK 49) | Ja — TWS API/IB Gateway | Krever en kontinuerlig kjørende IB Gateway-prosess (Java) med periodisk re-innlogging — ekstra driftskompleksitet på Railway |
+| **Nordnet** | Ja (nordisk) | Uklart/stengt — Nordnet tar **ikke imot nye API-kunder** for tiden | Utelukket inntil videre |
+
+**Hvorfor Saxo:**
+1. **Ett integrasjonspunkt løser både datakilde- og megler-spørsmålet** —
+   samme API leverer kurser (erstatter `DemoProvider` i PAPER-modus) og
+   ordreutførelse (fremtidig LIVE-modus), fremfor å koble til to separate
+   tjenester.
+2. **Selvbetjent SIM-miljø uten ferdig kundeforhold** — Saxos
+   utviklerportal (developer.saxobank.com) tilbyr en simulerings-konto man
+   kan registrere seg for direkte, uten å først ha en finansiert
+   Saxo-konto. Dette betyr vi kan bygge og teste `PAPER`-integrasjonen mot
+   ekte markedsdata og realistisk simulert ordreutførelse **før** noen
+   ekte, finansiert konto må opprettes.
+3. **REST/OAuth passer arkitekturen vår** — ingen langvarig
+   sesjons-/gateway-prosess å drifte på Railway, i motsetning til IBKR
+   (som krever en egen IB Gateway-prosess som må holdes innlogget).
+
+**Ikke avklart ennå — bruker må gjøre selve kontoregistreringen:**
+Jeg kan ikke opprette en konto eller godta vilkår hos Saxo på dine vegne.
+Konkrete steg for deg:
+
+1. Gå til <https://www.developer.saxo/accounts/signin> og registrer en
+   utviklerkonto (krever kun e-post — ikke en finansiert handelskonto).
+2. Be om en **SIM (simulerings)-applikasjon** i portalen — dette
+   utsteder AppKey/AppSecret/redirect-URI for simuleringsmiljøet.
+3. Send meg (ikke i klartekst i chat om du kan unngå det — samme mønster
+   som Railway-miljøvariablene) følgende, som `SAXO_*`-miljøvariabler:
+   `SAXO_APP_KEY`, `SAXO_APP_SECRET`, `SAXO_REDIRECT_URI`,
+   `SAXO_ENVIRONMENT=sim`.
+4. Les gjennom Saxos vilkår for OpenAPI/automatisert handel selv og
+   bekreft at du aksepterer dem — jeg kan ikke gjøre den juridiske
+   vurderingen for deg.
+
+**Fortsatt bevisst ikke avklart/antatt:** nøyaktig lisens/visningsrett for
+kurser i UI (pkt. 2 over), lagringsrett for historikk, kostnad ved skalering
+utover pilot — dette må leses ut av Saxos faktiske utvikleravtale når
+kontoen er opprettet, ikke antas her.
+
 ## Oppsummert: hva er allerede forberedt, og hva gjenstår
 
 **Allerede på plass (krever ingen endring for å bytte leverandør):**
