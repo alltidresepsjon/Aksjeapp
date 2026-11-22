@@ -255,3 +255,17 @@ h4.sub { margin: 14px 0 6px; color: var(--gold); font-family: Limelight, serif; 
   .screen .story { font-size: 16px; }
 }
 @media (hover: none) { .btn, .mini, .seg button { min-height: 34px; } }
+
+.diffrow { text-align: center; margin: -8px 0 12px; color: var(--mute); font-size: 13px; }
+.mini.gold-btn { background: var(--gold); color: #1a1408; border-color: var(--gold); }
+.go small { font-weight: 600; opacity: .7; font-size: 12px; }
+
+/* imported UI art (npm run art): textures and icons */
+.ic { width: 18px; height: 18px; object-fit: contain; vertical-align: -4px; margin-right: 5px; pointer-events: none; }
+#speed .ic, #zoombtns .ic, #maptools .ic { margin-right: 0; width: 20px; height: 20px; }
+#side, .modal, #card, #selbar { background-image: var(--ui-panel, none); background-size: cover; background-blend-mode: multiply; }
+.paper { background-image: var(--ui-paper, none); background-size: cover; }
+.go { background-image: var(--ui-button, none); background-size: 100% 100%; }
+.logo { display: block; width: min(560px, 90%); margin: 0 auto; filter: drop-shadow(0 6px 24px rgba(0,0,0,.6)); }
+.brief-art img { display: block; width: 100%; border-radius: 4px; margin: 4px 0 10px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+.screen { background-size: cover; background-position: center; }

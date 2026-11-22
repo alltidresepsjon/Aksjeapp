@@ -8,9 +8,12 @@ export interface Walker { id: number; x: number; y: number; path: Pt[]; face: nu
 export class Ambient {
   walkers: Walker[] = [];
   private pf: PathFinder;
+  private roads: PathFinder;
   private n = 0;
   constructor(private map: MapData, people = 26, cars = 7) {
     this.pf = new PathFinder(map);
+    this.roads = new PathFinder(map);
+    for (let i = 0; i < map.tiles.length; i++) if (map.tiles[i] !== 0) this.roads.walk[i] = 0;
     for (let i = 0; i < people; i++) this.walkers.push(this.spawn(false));
     for (let i = 0; i < cars; i++) this.walkers.push(this.spawn(true));
   }
@@ -54,7 +57,7 @@ export class Ambient {
         // fewer people out at night
         if (!w.car && Math.random() < night * 0.5) { w.wait = 4; continue; }
         const t = w.car ? this.laneTarget() : this.randomRoad();
-        w.path = this.pf.find(w, t).slice(0, 12);
+        w.path = (w.car ? this.roads : this.pf).find(w, t).slice(0, 12);
         w.wait = w.car ? 0.5 : 1 + Math.random() * 6;
         continue;
       }

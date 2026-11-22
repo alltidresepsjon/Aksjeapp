@@ -1,8 +1,8 @@
 // Campaign persistence: the roster, cash and cars that carry over between chapters.
 
 import { CHAPTERS, CORRADO, type ChapterDef } from './data/chapters';
-import type { Ad, Spec, Stats, VModel, WeaponId } from './types';
-import { World } from './sim/world';
+import type { Ad, Difficulty, Spec, Stats, VModel, WeaponId } from './types';
+import { DIFFICULTY, World } from './sim/world';
 import type { UnitInit } from './sim/units';
 import { genAd } from './sim/units';
 import { Rng } from './rng';
@@ -33,6 +33,7 @@ export interface CampaignSave {
   ads: Ad[];
   seed: number;
   lastReport: ChapterReport | null;
+  difficulty?: Difficulty;
 }
 
 export interface ChapterReport {
@@ -49,10 +50,10 @@ export interface ChapterReport {
 let idCounter = 0;
 const rid = () => 'r' + Date.now().toString(36) + (idCounter++).toString(36);
 
-export function newCampaign(seed = Date.now()): CampaignSave {
+export function newCampaign(seed = Date.now(), difficulty: Difficulty = 'normal'): CampaignSave {
   const rng = new Rng(seed);
   return {
-    version: 1, chapter: 0, cash: 600, cars: [], completed: [], seed, lastReport: null,
+    version: 1, chapter: 0, cash: 600 + DIFFICULTY[difficulty].cash, cars: [], completed: [], seed, lastReport: null, difficulty,
     ads: [0, 1, 2, 3, 4].map(() => genAd(rng, 1)),
     roster: [
       { id: 'nico', name: 'Nico Corrado', role: 'The Son', spec: 'none', stats: { muscle: 3, aim: 3, charm: 4, stealth: 3 }, level: 1, xp: 0, sp: 1, weapon: 'revolver', wage: 0, hero: true, kills: 0, chapters: 0 },
@@ -91,7 +92,7 @@ export function buildChapterWorld(def: ChapterDef, save: CampaignSave, crewIds: 
   const w = new World({
     mode: 'campaign', chapter: def.id, layout: def.layout, families, crew: { P: crew }, vehicles: cars,
     npcs: def.npcs, objectives: def.objectives, script: def.script, startHour: def.startHour, seed,
-    fog: def.num >= 2, bribeMult: def.bribeMult, news: def.news,
+    fog: def.num >= 2, bribeMult: def.bribeMult, news: def.news, difficulty: save.difficulty ?? 'normal',
   });
   return w;
 }

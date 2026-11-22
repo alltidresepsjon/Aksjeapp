@@ -13,7 +13,7 @@ import { PathFinder } from '../map/pathfind';
 import { Rng } from '../rng';
 import type {
   Act, Building, FamId, Family, GameEvent, Manager, Objective, Pt, ScriptTrigger, Unit, Vehicle, VModel,
-  WeaponId, WorldState,
+  WeaponId, WorldState, Difficulty,
 } from '../types';
 import { POLICE } from '../types';
 import type { Command } from './commands';
@@ -38,6 +38,23 @@ export interface WorldInit {
   bribeMult: number;
   news: string[];
   timeLimitDay?: number;
+  difficulty?: Difficulty;
+}
+
+/** How each difficulty changes the odds. Damage is what the player's people take from rivals. */
+export const DIFFICULTY: Record<Difficulty, { name: string; desc: string; dmgTaken: number; aiAggr: number; aiCap: number; aiMoney: number; heat: number; cash: number }> = {
+  easy: { name: 'Easy', desc: 'Rivals are slower and poorer, your people are tougher, the police more forgiving. $400 extra to start.', dmgTaken: 0.7, aiAggr: 0.65, aiCap: -2, aiMoney: 0.6, heat: 0.75, cash: 400 },
+  normal: { name: 'Normal', desc: 'The city as it is.', dmgTaken: 1, aiAggr: 1, aiCap: 0, aiMoney: 1, heat: 1, cash: 0 },
+  hard: { name: 'Hard', desc: 'Rivals hit harder and more often, have deeper pockets, and the police never sleep.', dmgTaken: 1.25, aiAggr: 1.35, aiCap: 2, aiMoney: 1.4, heat: 1.2, cash: -100 },
+};
+
+/** Everything needed to continue a campaign chapter later (the map is rebuilt from the chapter). */
+export interface WorldSave {
+  v: 1;
+  s: WorldState;
+  rng: number;
+  fired: string[];
+  difficulty: Difficulty;
 }
 
 const dist = (a: Pt, b: Pt) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -49,6 +66,7 @@ export class World {
   rng: Rng;
   startHour: number;
   bribeMult: number;
+  difficulty: Difficulty;
   ai = new Map<FamId, AiMemory>();
   fired: string[] = [];
   private unitIdx = new Map<number, Unit>();
@@ -59,6 +77,8 @@ export class World {
     this.rng = new Rng(init.seed);
     this.startHour = init.startHour;
     this.bribeMult = init.bribeMult;
+    this.difficulty = init.difficulty ?? 'normal';
+    const D = DIFFICULTY[this.difficulty];
     const rng = this.rng;
     const buildings: Building[] = this.map.lots.map((l, i) => {
       const def = BTYPES[l.type];
@@ -85,8 +105,9 @@ export class World {
       if (hq && !f.human) hq.safe = 1500;
       families[f.id] = {
         id: f.id, name: f.name, short: f.short, color: f.color, human: f.human, player: f.player ?? '',
-        money: f.money, hq: hq ? hq.id : -1, eliminated: false, payroll: { precinct: 0, hall: 0, judge: 0 },
-        reveal: 0, robbed: 0, delivered: 0, aggression: f.aggression, cap: f.cap, statLo: f.statLo, statHi: f.statHi,
+        money: f.human ? f.money : Math.round(f.money * D.aiMoney), hq: hq ? hq.id : -1, eliminated: false, payroll: { precinct: 0, hall: 0, judge: 0 },
+        reveal: 0, robbed: 0, delivered: 0, aggression: f.human ? f.aggression : Math.min(0.95, f.aggression * D.aiAggr),
+        cap: f.human ? f.cap : Math.max(2, f.cap + D.aiCap), statLo: f.statLo, statHi: f.statHi,
         nextAi: 2 + Object.keys(families).length * 0.7, edge: !!f.edge || !hq, income: 0,
       };
     }
@@ -122,6 +143,20 @@ export class World {
     for (const t of init.news) this.news(t, true);
     for (let i = 0; i < 4; i++) this.s.ads.push(genAd(this.rng, 1));
     if (init.mode === 'campaign') this.s.order = init.families.map((f) => f.id);
+  }
+
+  // ---------- saving ----------
+  save(): WorldSave {
+    return { v: 1, s: JSON.parse(JSON.stringify(this.s)), rng: this.rng.s, fired: [...this.fired], difficulty: this.difficulty };
+  }
+  /** Replace this freshly built world's state with a saved one (same chapter/map). */
+  restore(save: WorldSave) {
+    this.s = save.s;
+    this.rng.s = save.rng;
+    this.fired = [...save.fired];
+    this.difficulty = save.difficulty;
+    this.unitIdx = new Map(this.s.units.map((u) => [u.id, u]));
+    this.ai.clear();
   }
 
   // ---------- lookups ----------
@@ -918,7 +953,8 @@ export class World {
 
   // ---------- combat ----------
   heatMult(u: Unit): number {
-    return Math.max(0.3, 1 - u.stats.stealth * 0.06) * (this.night() ? 0.65 : 1);
+    const d = this.s.families[u.fam]?.human ? DIFFICULTY[this.difficulty].heat : 1;
+    return Math.max(0.3, 1 - u.stats.stealth * 0.06) * (this.night() ? 0.65 : 1) * d;
   }
   /** How close an enemy must be to notice this unit. */
   detectRange(u: Unit): number {
@@ -1059,6 +1095,7 @@ export class World {
   }
   hurt(t: Unit, dmg: number, by: Unit | null) {
     const s = this.s;
+    if (s.families[t.fam]?.human && s.mode === 'campaign') dmg *= DIFFICULTY[this.difficulty].dmgTaken;
     t.hp -= dmg;
     t.lastHurt = s.time;
     if (by) t.lastAttacker = by.id;

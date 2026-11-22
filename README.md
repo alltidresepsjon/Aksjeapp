@@ -30,6 +30,7 @@ Vil du teste på mobilen i samme nettverk? Vite skriver ut en nettverksadresse (
 
 ## Hva er med
 
+- **Vanskelighetsgrad og lagring**: lett, normal eller vanskelig. Kapitler lagres automatisk hver morgen og med «Save game» i menyen.
 - **Kampanje i 7 kapitler**, hvert med eget kart, briefing og valg av crew. Mellom kapitlene er du i et safehouse: der fordeler du ferdighetspoeng, kjøper våpen og biler, og ansetter eller sparker folk via avisa. Spillet lagres automatisk i nettleseren.
 - **Isometrisk by** med hus, gater, gatelys, trær, folk og trafikk. Du kan panorere og zoome (mus, hjul eller to fingre), og det er et minikart.
 - **Kamp**: du sender folkene dine og velger aggresjon (*Passive*, *Defend*, *Attack*) og om de skal *flykte når de er såret*. Resten går automatisk. Våpenrekkevidde, Aim, dekning bak vegger og Stealth avgjør hvordan det går.

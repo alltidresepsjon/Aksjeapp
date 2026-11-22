@@ -4,7 +4,9 @@ import { Application, Container, Graphics, Sprite, Text, Texture } from 'pixi.js
 import {
   BTYPES, nightFactor, PathFinder, type Building, type FamId, type GameEvent, type MapData, type Unit, type Vehicle, type ViewState,
 } from '@bg/shared';
-import { drawGround } from './ground';
+import { drawGround, isParkBlock } from './ground';
+import { buildOutskirts, type Outskirts } from './outskirts';
+import { PERIOD as BLOCK_PERIOD, ROAD as ROAD_W } from '@bg/shared';
 import { BUILDING_RES, INSET, buildingArt, burnedArt, type BuildingArt } from './tex/buildings';
 import { SPRITE_RES, carFrame, corpse, dot, flag, glow, lampPost, personFrames, tree, type PersonLook } from './tex/sprites';
 import { artRng, hex, mix, mul, toScreen, toWorld, TW, TH } from './iso';
@@ -48,13 +50,13 @@ export class WorldRenderer {
   private corpses: { s: Sprite; life: number }[] = [];
   private tracers: { x0: number; y0: number; x1: number; y1: number; life: number; color: number }[] = [];
   private flashes: { s: Sprite; life: number; max: number }[] = [];
-  private sparks: { x: number; y: number; vx: number; vy: number; life: number; max: number; color: number; size: number; grav: number }[] = [];
+  private sparks: { x: number; y: number; vx: number; vy: number; life: number; max: number; color: number; size: number; grav: number; a?: number }[] = [];
   private hurtUntil = new Map<number, number>();
   private lampGlows: Sprite[] = [];
   private props: Sprite[] = [];
   private texCache = new Map<string, Texture[]>();
   private carCache = new Map<string, CarFrame[]>();
-  private glowTex: Texture;
+  private glowTex = Texture.from(glow('rgba(255,210,130,0.85)', 160));
   private headTex: Texture;
   private dotTex: Texture;
   private flagTex: Texture;
@@ -77,9 +79,39 @@ export class WorldRenderer {
     this.explored = new Uint8Array(map.w * map.h);
     this.groundG = drawGround(map);
     this.objects.sortableChildren = true;
-    this.root.addChild(this.groundG, this.ownerG, this.fxGround, this.fogG, this.objects, this.lights, this.fx, this.overlay);
+    this.out = buildOutskirts(map);
+    this.root.addChild(this.out.back, this.groundG, this.ownerG, this.fxGround, this.fogG, this.objects, this.lights, this.fx, this.overlay);
+    for (const o of this.out.objects) {
+      o.sprite.zIndex = o.depth;
+      this.objects.addChild(o.sprite);
+      if (o.lit) this.lights.addChild(o.lit);
+    }
+    // lamps along the boardwalk
+    {
+      const lampTex2 = Texture.from(lampPost());
+      const spots: { x: number; y: number }[] = [];
+      for (let x = -6; x < map.w + 2; x += 4) spots.push({ x, y: map.h + 2.0 });
+      for (let y = -6; y < map.h; y += 4) spots.push({ x: map.w + 2.0, y });
+      for (const l of spots) {
+        const p = toScreen(l.x, l.y);
+        const s = new Sprite(lampTex2); s.anchor.set(0.5, 57 / 60); s.scale.set(1 / SPRITE_RES); s.position.set(p.x, p.y); s.zIndex = l.x + l.y;
+        this.objects.addChild(s); this.props.push(s);
+        const gl = new Sprite(this.glowTex); gl.anchor.set(0.5); gl.blendMode = 'add'; gl.scale.set(1.2); gl.position.set(p.x, p.y);
+        this.lights.addChild(gl); this.lampGlows.push(gl);
+      }
+    }
+    // bandstands and statues in the parks
+    for (let by = 0; by < map.bh; by++) for (let bx = 0; bx < map.bw; bx++) {
+      if (!isParkBlock(map, bx, by)) continue;
+      const cx = bx * BLOCK_PERIOD + ROAD_W + 3, cy = by * BLOCK_PERIOD + ROAD_W + 3;
+      const a = propArt((bx + by) % 2 ? 'statue' : 'bandstand');
+      const sp = new Sprite(Texture.from(a.cv)); sp.anchor.set(a.ax, a.ay); sp.scale.set(1 / SPRITE_RES);
+      const q = toScreen(cx, cy); sp.position.set(q.x, q.y); sp.zIndex = cx + cy;
+      this.objects.addChild(sp); this.props.push(sp);
+      this.parkCenters.push({ x: cx, y: cy });
+    }
     this.overlay.addChild(this.bars);
-    this.glowTex = Texture.from(glow('rgba(255,210,130,0.85)', 160));
+
     this.headTex = Texture.from(glow('rgba(255,240,190,0.9)', 120));
     this.dotTex = Texture.from(dot(32));
     this.flagTex = Texture.from(flag());
@@ -103,6 +135,8 @@ export class WorldRenderer {
     }
     const treeTex = [0, 1, 2, 3].map((i) => Texture.from(tree(i * 7919 + 13)));
     map.trees.forEach((t, i) => {
+      // keep paths, the ring walk and the bandstand clear
+      if (this.parkCenters.some((c) => { const dx = t.x - c.x, dy = t.y - c.y, d = Math.hypot(dx, dy); return d < 1.2 || (d > 1.55 && d < 2.4) || ((Math.abs(dx) < 0.45 || Math.abs(dy) < 0.45) && d < 3.1); })) return;
       const p = toScreen(t.x, t.y);
       const s = new Sprite(treeTex[i % treeTex.length]);
       s.anchor.set(0.5, 60 / 64);
@@ -171,13 +205,17 @@ export class WorldRenderer {
     }
   }
   private parked: { sp: Sprite; fr: CarFrame; color: number }[] = [];
+  private parkCenters: { x: number; y: number }[] = [];
+  private out!: Outskirts;
+  private steamT = 0;
+  rain = 0;
 
   // ---------- camera ----------
   setCamera(x: number, y: number, zoom = this.zoom) {
     const { w, h } = this.map;
-    const minX = -h * (TW / 2), maxX = w * (TW / 2), maxY = (w + h) * (TH / 2);
+    const minX = -(h + 6) * (TW / 2), maxX = (w + 6) * (TW / 2), maxY = (w + h + 10) * (TH / 2);
     this.camX = Math.max(minX, Math.min(maxX, x));
-    this.camY = Math.max(-100, Math.min(maxY, y));
+    this.camY = Math.max(-260, Math.min(maxY, y));
     this.zoom = Math.max(0.35, Math.min(2.6, zoom));
     this.applyCamera();
   }
@@ -244,7 +282,7 @@ export class WorldRenderer {
     sp.tint = fr.tintable ? mul(mix(color, 0xffffff, 0.25), ambient) : ambient;
   }
   /** Imported character art for a unit, if the art pack has some. */
-  private packPerson(u: Unit, view: ViewState): Texture | null {
+  private packPerson(u: Unit, view: ViewState): Texture[] | null {
     if (!this.pack || this.pack.empty) return null;
     const fam = u.cop ? 'police' : (view.families[u.fam]?.short ?? '').toLowerCase();
     const keys: string[] = [];
@@ -341,9 +379,25 @@ export class WorldRenderer {
     this.ensureBuildings(view);
     const nf = nightFactor(view.hour);
     const dusk = view.hour > 16 && view.hour < 21 ? 1 - Math.abs(view.hour - 19) / 2.5 : 0;
-    let ambient = mix(0xffffff, 0x5a6aa8, nf * 0.85);
-    if (dusk > 0 && nf < 0.8) ambient = mix(ambient, 0xffb070, Math.max(0, dusk) * 0.35);
+    const visEarly = this.sess.vis();
+    const seenFn = (x: number, y: number) => !visEarly || visEarly[Math.floor(y) * this.map.w + Math.floor(x)] === 1;
+    // warm amber by day, deep blue at night, a little greyer when it rains
+    let ambient = mix(0xfff1dc, 0x55669f, nf * 0.85);
+    if (dusk > 0 && nf < 0.8) ambient = mix(ambient, 0xffa860, Math.max(0, dusk) * 0.4);
+    if (this.rain > 0) ambient = mix(ambient, 0x8c96a4, 0.28 * this.rain);
     this.groundG.tint = ambient;
+    for (const c of this.out.back.children) if (c !== this.out.night) (c as Graphics).tint = ambient;
+    this.out.night.alpha = nf;
+    for (const o of this.out.objects) { o.sprite.tint = ambient; if (o.lit) { o.lit.alpha = nf; o.lit.visible = nf > 0.05; } }
+    this.steamT -= dt;
+    if (this.steamT <= 0) {
+      this.steamT = 0.25;
+      for (const st of this.out.steam) {
+        if (!seenFn(st.x, st.y)) continue;
+        const q = toScreen(st.x, st.y);
+        this.sparks.push({ x: q.x + (Math.random() - 0.5) * 6, y: q.y - 2, vx: (Math.random() - 0.5) * 6, vy: -12 - Math.random() * 6, life: 2.4, max: 2.4, color: 0xc8c8c4, size: 3 + Math.random() * 2.5, grav: -2, a: 0.32 });
+      }
+    }
     this.ownerG.alpha = 0.6 + nf * 0.4;
     const vis = this.sess.vis();
     if (vis) for (let i = 0; i < vis.length; i++) if (vis[i]) this.explored[i] = 1;
@@ -428,20 +482,20 @@ export class WorldRenderer {
       if (!show) { if (us) us.root.visible = false; continue; }
       const custom = this.packPerson(u, view);
       const { key: baseKey, look } = this.lookFor(u, view);
-      const key = custom ? 'pk:' + custom.uid : baseKey;
+      const key = custom ? 'pk:' + custom[0].uid : baseKey;
       if (!us || us.key !== key) {
         if (us) us.root.destroy({ children: true });
-        const frames = custom ? [custom, custom, custom, custom] : this.personTex(key, look);
+        const frames = custom ? (custom.length >= 4 ? custom : [custom[0], custom[0], custom[0], custom[0]]) : this.personTex(key, look);
         const root = new Container();
         const shadow = new Sprite(this.dotTex);
         shadow.anchor.set(0.5); shadow.tint = 0; shadow.alpha = 0.45; shadow.scale.set(0.7, 0.3);
         const body = new Sprite(frames[0]);
         body.anchor.set(0.5, custom ? 0.97 : 37 / 40);
-        const base = custom ? 46 / custom.height : 1 / SPRITE_RES;
+        const base = custom ? 46 / custom[0].height : 1 / SPRITE_RES;
         body.scale.set(base);
         root.addChild(shadow, body);
         this.objects.addChild(root);
-        us = { root, body, shadow, frames, key, seen: now, base, single: !!custom };
+        us = { root, body, shadow, frames, key, seen: now, base, single: !!custom && custom.length < 4 };
         this.units.set(u.id, us);
       }
       us.seen = now;
@@ -534,15 +588,15 @@ export class WorldRenderer {
           const coat = CIV_COATS[w.look];
           const look: PersonLook = { coat, hat: mix(coat, 0x111111, 0.5), pants: 0x2a2a30, skin: [0xe0b898, 0xc89a78, 0x9a6a4a, 0x6a4a32][w.look % 4], kind: w.look % 3 === 0 ? 'woman' : 'civ' };
           const custom = this.pack?.person(['civilian'], w.look) ?? null;
-          const frames = custom ? [custom, custom, custom, custom] : this.personTex('civ' + w.look, look);
+          const frames = custom ? (custom.length >= 4 ? custom : [custom[0], custom[0], custom[0], custom[0]]) : this.personTex('civ' + w.look, look);
           const root = new Container();
           const shadow = new Sprite(this.dotTex); shadow.anchor.set(0.5); shadow.tint = 0; shadow.alpha = 0.4; shadow.scale.set(0.6, 0.26);
           const body = new Sprite(frames[0]); body.anchor.set(0.5, custom ? 0.97 : 37 / 40);
-          const base = custom ? 44 / custom.height : 1 / SPRITE_RES;
+          const base = custom ? 44 / custom[0].height : 1 / SPRITE_RES;
           body.scale.set(base);
           root.addChild(shadow, body);
           this.objects.addChild(root);
-          s = { root, body, shadow, frames, key: 'p', seen: 0, base, single: !!custom } as USprite;
+          s = { root, body, shadow, frames, key: 'p', seen: 0, base, single: !!custom && custom.length < 4 } as USprite;
         }
         this.civs.set(w.id, s);
       }
@@ -669,7 +723,7 @@ export class WorldRenderer {
       sp.life -= dt;
       sp.vy += sp.grav * dt;
       sp.x += sp.vx * dt; sp.y += sp.vy * dt;
-      g.circle(sp.x, sp.y, sp.size).fill({ color: sp.color, alpha: Math.max(0, sp.life / sp.max) });
+      g.circle(sp.x, sp.y, sp.size * (sp.a !== undefined ? 1 + (1 - sp.life / sp.max) : 1)).fill({ color: sp.color, alpha: Math.max(0, sp.life / sp.max) * (sp.a ?? 1) });
     }
     this.sparks = this.sparks.filter((sp) => sp.life > 0);
     for (const f of this.flashes) { f.life -= dt; f.s.alpha = Math.max(0, f.life / f.max); }

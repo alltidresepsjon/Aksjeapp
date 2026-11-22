@@ -1,6 +1,6 @@
 // One running mission (campaign chapter or Turf War match): map view, HUD, panels and controls.
 
-import { Application } from 'pixi.js';
+import { Application, Graphics, Sprite, Texture } from 'pixi.js';
 import {
   BTYPES, OFFICIALS, RACKETS, SPEC_INFO, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, isNight, isOpen, nightFactor,
   type Act, type Building, type Command, type GameEvent, type Racket, type Stance, type StatKey, type Unit, type Vehicle, type ViewState, type WeaponId,
@@ -20,6 +20,8 @@ export interface GameOptions {
   onEnd: (won: boolean, text: string) => void;
   onQuit: () => void;
   quitLabel: string;
+  /** Saves the game; returns a short confirmation. Only for the campaign. */
+  onSave?: () => string;
 }
 
 type Mode = 'none' | 'kidnap' | 'routeFrom' | 'routeTo' | 'box';
@@ -111,11 +113,21 @@ export class Game {
     if (this.destroyed) return;
     view.prepend(this.app.canvas);
     const pack = await loadArtPack();
+    this.pack = pack;
     if (this.destroyed) return;
     this.renderer = new WorldRenderer(this.app, this.sess.map, this.sess, pack);
     const face = pack.ui('tommaso');
     if (face) $('#adv-face', this.root).insertAdjacentHTML('afterbegin', `<img src="${face}" alt="">`), $('#adv-face svg', this.root)?.remove();
     this.app.stage.addChild(this.renderer.root);
+    // screen-space weather and a cinematic vignette
+    this.rainG = new Graphics();
+    const vc = document.createElement('canvas'); vc.width = 256; vc.height = 256;
+    const vx = vc.getContext('2d')!;
+    const grad = vx.createRadialGradient(128, 128, 60, 128, 128, 182);
+    grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(8,6,4,0.62)');
+    vx.fillStyle = grad; vx.fillRect(0, 0, 256, 256);
+    this.vignette = new Sprite(Texture.from(vc));
+    this.app.stage.addChild(this.rainG, this.vignette);
     this.minimap = new Minimap(this.sess.map, this.sess, this.renderer, $('#mmhost', this.root));
     this.renderer.onEvent = (e, vis) => this.onEvent(e, vis);
     this.input = new Input(this.app.canvas, {
@@ -144,6 +156,31 @@ export class Game {
   }
 
   private onResize = () => { this.renderer?.applyCamera(); };
+  private rainG!: Graphics;
+  private vignette!: Sprite;
+  private rainDrops: { x: number; y: number; v: number }[] = [];
+  /** Some days it rains on Port Halloran (purely for looks). */
+  private weather(dt: number, v: ViewState) {
+    const sw = this.app.screen.width, sh = this.app.screen.height;
+    this.vignette.width = sw; this.vignette.height = sh;
+    let h = 0;
+    for (const ch of v.chapter) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    const rainyDay = ((v.day * 7 + h) >>> 0) % 3 === 0;
+    const want = rainyDay && v.hour > 11 && v.hour < 23 ? 1 : 0;
+    this.renderer.rain += (want - this.renderer.rain) * Math.min(1, dt * 0.5);
+    const g = this.rainG;
+    g.clear();
+    if (this.renderer.rain < 0.03) return;
+    const n = Math.floor(220 * this.renderer.rain);
+    while (this.rainDrops.length < n) this.rainDrops.push({ x: Math.random() * sw, y: Math.random() * sh, v: 700 + Math.random() * 400 });
+    this.rainDrops.length = n;
+    for (const d of this.rainDrops) {
+      d.y += d.v * dt; d.x -= d.v * 0.18 * dt;
+      if (d.y > sh) { d.y = -20; d.x = Math.random() * (sw + 100); }
+      g.moveTo(d.x, d.y).lineTo(d.x + 3, d.y - 16);
+    }
+    g.stroke({ width: 1, color: 0xc8d4e0, alpha: 0.35 * this.renderer.rain });
+  }
   private cameraPlaced = false;
   /** Start the camera at our headquarters (a little toward the city centre), once the state has arrived. */
   private placeCamera() {
@@ -172,11 +209,17 @@ export class Game {
     this.renderer.selectedVehicle = this.selVehicle;
     this.renderer.selectedBuilding = this.selBuilding;
     this.renderer.sync(dt);
+    this.weather(dt, v);
     this.minimap.update(dt);
     const night = isNight(v.hour);
     if (night !== this.lastNight) { this.lastNight = night; audio.setNight(night); }
     this.uiT -= dt;
     if (this.uiT <= 0) { this.uiT = 0.2; this.refresh(false); }
+    if (this.opts.onSave && !v.result) {
+      this.autoT += dt;
+      const morning = v.day !== this.lastSaveDay && v.hour >= 6;
+      if (morning || this.autoT > 120) { this.autoT = 0; this.lastSaveDay = v.day; this.opts.onSave(); }
+    }
     if (v.result && !this.ended) {
       this.ended = true;
       const won = v.result.winner === this.sess.fam;
@@ -499,6 +542,7 @@ export class Game {
       case 'quit': $('#overlay', this.root).innerHTML = ''; this.opts.onQuit(); return;
       case 'vol': return;
       case 'help': this.help(); return;
+      case 'save': { const msg = this.opts.onSave?.() ?? ''; const n = document.getElementById('saveNote'); if (n) n.textContent = msg; return; }
     }
     this.refresh(true);
   }
@@ -510,7 +554,8 @@ export class Game {
       <p class="mute">${esc(this.opts.title)} · ${esc(this.opts.subtitle)}</p>
       <label class="slider">Effects <input type="range" min="0" max="1" step="0.05" value="${audio.volume.sfx}" data-vol="sfx"></label>
       <label class="slider">Music <input type="range" min="0" max="1" step="0.05" value="${audio.volume.music}" data-vol="music"></label>
-      <div class="row-btns"><button class="btn gold" data-a="resume">Resume</button><button class="btn" data-a="help">How to play</button><button class="btn red" data-a="quit">${esc(this.opts.quitLabel)}</button></div></div>`;
+      <div class="row-btns"><button class="btn gold" data-a="resume">Resume</button>${this.opts.onSave ? '<button class="btn" data-a="save">💾 Save game</button>' : ''}<button class="btn" data-a="help">How to play</button><button class="btn red" data-a="quit">${esc(this.opts.quitLabel)}</button></div>
+      <p class="mute small center" id="saveNote">${this.opts.onSave ? 'The game also saves itself every morning and every couple of minutes.' : ''}</p></div>`;
     $$<HTMLInputElement>('input[data-vol]', o).forEach((i) => { i.oninput = () => { audio.volume[i.dataset.vol as 'sfx' | 'music'] = +i.value; audio.applyVolume(); }; });
   }
   help() {
@@ -530,6 +575,7 @@ export class Game {
     else if (this.tab === 'paper') this.paperPane(v);
     else this.goalsPane(v);
     this.selBar(v);
+    this.applyIcons();
     this.arrows(v);
     this.tutorial(v);
     this.card(v);
@@ -582,6 +628,22 @@ export class Game {
   }
 
   // ---------- tutorial: Uncle Tommaso walks you through chapter 1 ----------
+  private pack: Awaited<ReturnType<typeof loadArtPack>> | null = null;
+  /** Puts imported icons on buttons (if there are any). */
+  private applyIcons() {
+    const p = this.pack;
+    if (!p) return;
+    const map: Record<string, string> = { retreat: 'flee', kidnap: 'kidnap', manager: 'manager', guard: 'guard', racket: 'racket', buyCar: 'car', cargo: 'cargo', driveBy: 'driveby', exit: 'exit', route: 'route', walk: 'walk', hire: 'hire', bail: 'bail', fireManager: 'fire', closeRacket: 'close', hostage: 'hostage', all: 'all', none: 'clear', multi: 'multi' };
+    for (const b of $$<HTMLElement>('button:not([data-ic-done])', this.root)) {
+      const d = b.dataset;
+      const name = d.a === 'act' || d.a === 'stance' || d.a === 'hostage' ? d.v : d.a ? map[d.a] : d.tool ?? d.tab ?? (d.sp === '0' ? 'pause' : d.sp === 'skip' ? 'skip' : d.z === 'in' ? 'zoom-in' : d.z === 'out' ? 'zoom-out' : undefined);
+      b.dataset.icDone = '1';
+      const url = name ? p.icon(name) : null;
+      if (url) b.insertAdjacentHTML('afterbegin', `<img class="ic" src="${url}" alt="">`);
+    }
+  }
+  private autoT = 0;
+  private lastSaveDay = 0;
   private tutStep = -1;
   private tutT = 0;
   private tutorial(v: ViewState) {

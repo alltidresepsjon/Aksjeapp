@@ -123,7 +123,8 @@ export function runScript(w: World) {
         if (!fam || fam.eliminated) continue;
         const at = w.edgePoint(a.edge);
         const units = [];
-        for (let i = 0; i < a.n; i++) {
+        const n = Math.max(1, a.n + (w.difficulty === 'easy' ? -1 : w.difficulty === 'hard' ? 1 : 0));
+        for (let i = 0; i < n; i++) {
           const u = w.addUnit(soldierInit(w.rng, a.fam, fam.statLo, fam.statHi, a.weapon), w.jitter(at, 1));
           u.behavior = { k: 'raid', tag: a.tag };
           u.stance = 'aggressive';

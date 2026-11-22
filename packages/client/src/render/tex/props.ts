@@ -3,7 +3,7 @@
 import { canvas, css } from '../iso';
 import { SPRITE_RES } from './sprites';
 
-export type PropKind = 'hydrant' | 'mailbox' | 'newsstand' | 'bench' | 'barrels' | 'crates' | 'trash' | 'clock';
+export type PropKind = 'hydrant' | 'mailbox' | 'newsstand' | 'bench' | 'barrels' | 'crates' | 'trash' | 'clock' | 'bandstand' | 'statue';
 
 export interface PropArt { cv: HTMLCanvasElement; ax: number; ay: number }
 
@@ -13,6 +13,7 @@ function shadow(ctx: CanvasRenderingContext2D, x: number, y: number, rx: number,
 }
 
 export function propArt(kind: PropKind): PropArt {
+  if (kind === 'bandstand' || kind === 'statue') return bigProp(kind);
   const W = 40, H = 56;
   const [cv, ctx] = canvas(W * SPRITE_RES, H * SPRITE_RES);
   ctx.scale(SPRITE_RES, SPRITE_RES);
@@ -81,6 +82,37 @@ export function propArt(kind: PropKind): PropArt {
       ctx.fillStyle = '#efe4c8'; ctx.beginPath(); ctx.arc(cx, gy - 38, 4.5, 0, 7); ctx.fill();
       ctx.strokeStyle = '#1a1a1a'; ctx.lineWidth = 0.8; ctx.beginPath(); ctx.moveTo(cx, gy - 38); ctx.lineTo(cx, gy - 41.5); ctx.moveTo(cx, gy - 38); ctx.lineTo(cx + 2.5, gy - 37); ctx.stroke();
       break;
+  }
+  return { cv, ax: cx / W, ay: gy / H };
+}
+
+function bigProp(kind: 'bandstand' | 'statue'): PropArt {
+  const W = 120, H = 130;
+  const [cv, ctx] = canvas(W * SPRITE_RES, H * SPRITE_RES);
+  ctx.scale(SPRITE_RES, SPRITE_RES);
+  const cx = W / 2, gy = H - 20;
+  if (kind === 'bandstand') {
+    // an octagonal bandstand: stone base, white posts, green copper roof with a finial
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(cx, gy + 4, 50, 22, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#9a9080'; ctx.beginPath(); ctx.ellipse(cx, gy, 46, 20, 0, 0, 7); ctx.fill();
+    ctx.fillRect(cx - 46, gy - 8, 92, 8);
+    ctx.fillStyle = '#b8ae9c'; ctx.beginPath(); ctx.ellipse(cx, gy - 8, 46, 20, 0, 0, 7); ctx.fill();
+    for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + 0.2; const x = cx + Math.cos(a) * 40, y = gy - 8 + Math.sin(a) * 17; if (Math.sin(a) < -0.2) continue; ctx.fillStyle = '#efe8da'; ctx.fillRect(x - 2, y - 44, 4, 44); }
+    ctx.strokeStyle = '#efe8da'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(cx, gy - 22, 42, 18, 0, 0, Math.PI); ctx.stroke();
+    ctx.fillStyle = '#4a7a6a'; ctx.beginPath(); ctx.moveTo(cx - 52, gy - 50); ctx.quadraticCurveTo(cx, gy - 100, cx + 52, gy - 50); ctx.quadraticCurveTo(cx, gy - 36, cx - 52, gy - 50); ctx.fill();
+    ctx.fillStyle = '#3a6a5a'; ctx.beginPath(); ctx.ellipse(cx, gy - 50, 52, 14, 0, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = '#d8c070'; ctx.beginPath(); ctx.arc(cx, gy - 88, 3, 0, 7); ctx.fill(); ctx.fillRect(cx - 1, gy - 98, 2, 10);
+  } else {
+    // a bronze founder on a granite plinth
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(cx, gy + 2, 26, 11, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#8a8680'; ctx.fillRect(cx - 18, gy - 30, 36, 30);
+    ctx.fillStyle = '#6a6660'; ctx.fillRect(cx + 4, gy - 30, 14, 30);
+    ctx.fillStyle = '#9a968e'; ctx.fillRect(cx - 21, gy - 34, 42, 5);
+    ctx.fillStyle = '#4a6a58';
+    ctx.fillRect(cx - 7, gy - 76, 14, 34); ctx.fillRect(cx - 7, gy - 44, 5, 10); ctx.fillRect(cx + 2, gy - 44, 5, 10);
+    ctx.beginPath(); ctx.arc(cx, gy - 82, 6, 0, 7); ctx.fill();
+    ctx.fillRect(cx + 6, gy - 92, 4, 24); // raised arm
+    ctx.fillStyle = '#5a7a68'; ctx.fillRect(cx - 7, gy - 76, 5, 34);
   }
   return { cv, ax: cx / W, ay: gy / H };
 }

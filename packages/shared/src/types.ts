@@ -237,6 +237,8 @@ export interface ScriptTrigger {
   fired?: boolean;
 }
 
+export type Difficulty = 'easy' | 'normal' | 'hard';
+
 export interface WorldState {
   mode: 'campaign' | 'turf';
   chapter: string;

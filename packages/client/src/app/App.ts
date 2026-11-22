@@ -2,7 +2,7 @@
 
 import {
   CHAPTERS, SPEC_INFO, TURF_FAMILIES, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, buildChapterWorld, finishChapter, hireFromAd,
-  newCampaign, refreshSafehouseAds, spendSkillPoint, type CampaignSave, type ChapterDef, type LobbyPlayer, type ServerMsg, type StatKey,
+  newCampaign, refreshSafehouseAds, spendSkillPoint, DIFFICULTY, type CampaignSave, type ChapterDef, type Difficulty, type LobbyPlayer, type ServerMsg, type StatKey, type WorldSave,
   type VModel, type WeaponId, type Layout, XP_PER_LEVEL,
 } from '@bg/shared';
 import { Game, HELP_HTML } from './Game';
@@ -13,6 +13,12 @@ import { loadArtPack } from '../render/artPack';
 import { $, $$, el, esc, money, statIcons } from '../ui/dom';
 
 const SAVE_KEY = 'bg-campaign-v1';
+const CHAPTER_KEY = 'bg-chapter-v1';
+
+interface ChapterSave { chapter: string; crew: string[]; when: string; world: WorldSave }
+function readChapterSave(): ChapterSave | null {
+  try { return JSON.parse(localStorage.getItem(CHAPTER_KEY) ?? 'null'); } catch { return null; }
+}
 
 export class App {
   save: CampaignSave | null = null;
@@ -20,7 +26,20 @@ export class App {
   screen: HTMLElement;
   net: Net | null = null;
 
+  /** Background picture for a screen, if one was imported. */
+  private backdrop(name: string, dark = 0.8) {
+    void loadArtPack().then((p) => {
+      const url = p.ui(name);
+      if (url) this.screen.style.backgroundImage = `linear-gradient(rgba(5,6,8,${dark - 0.25}), rgba(5,6,8,${dark})), url(${url})`;
+    });
+  }
+
   constructor(private root: HTMLElement) {
+    // imported textures for panels, paper and buttons become CSS variables
+    void loadArtPack().then((p) => {
+      const st = document.documentElement.style;
+      for (const n of ['panel', 'paper', 'button']) { const u = p.ui(n); if (u) st.setProperty(`--ui-${n}`, `url(${u})`); }
+    });
     this.screen = el('<div class="screen"></div>');
     root.appendChild(this.screen);
     try { const raw = localStorage.getItem(SAVE_KEY); if (raw) this.save = JSON.parse(raw); } catch { this.save = null; }
@@ -35,6 +54,8 @@ export class App {
     this.screen.innerHTML = html;
     this.screen.style.display = 'flex';
     this.screen.scrollTop = 0;
+    const art = this.screen.querySelector<HTMLElement>('[data-art]');
+    if (art) void loadArtPack().then((pk) => { const u = pk.ui(art.dataset.art!); if (u) art.innerHTML = `<img src="${u}" alt="">`; else art.remove(); });
   }
   private hide() { this.screen.style.display = 'none'; this.screen.innerHTML = ''; }
 
@@ -46,18 +67,27 @@ export class App {
     this.show(`<div class="box title">
       <h1>Bathtub Gin</h1><div class="sub">Blood Debt · Port Halloran, 1928</div>
       <div class="menu">
-        ${cont ? `<button class="go" data-go="continue">Continue — Chapter ${this.save!.chapter + 1}: ${esc(CHAPTERS[this.save!.chapter].title)}</button>` : ''}
+        ${cont ? (() => { const cs = readChapterSave(); const c = CHAPTERS[this.save!.chapter]; return cs && cs.chapter === c.id
+          ? `<button class="go" data-go="resume">Continue — Chapter ${c.num}: ${esc(c.title)} <small>(saved ${esc(cs.when)})</small></button>`
+          : `<button class="go" data-go="continue">Continue — Chapter ${c.num}: ${esc(c.title)}</button>`; })() : ''}
         <button class="${cont ? 'btn big' : 'go'}" data-go="new">New campaign</button>
         <button class="btn big" data-go="turf">Turf War · online, 2–4 players</button>
         <button class="btn big" data-go="help">How to play</button>
       </div>
       <p class="credits">An original game about Prohibition, family and revenge. Works on PC and mobile.</p>
     </div>`, 'title-screen');
-    void loadArtPack().then((p) => { const bg = p.ui('title'); if (bg) this.screen.style.backgroundImage = `linear-gradient(rgba(5,6,8,.55), rgba(5,6,8,.9)), url(${bg})`; });
+    void loadArtPack().then((p) => {
+      const bg = p.ui('title');
+      if (bg) this.screen.style.backgroundImage = `linear-gradient(rgba(5,6,8,.35), rgba(5,6,8,.88)), url(${bg})`;
+      const logo = p.ui('logo');
+      const h1 = this.screen.querySelector('.title h1');
+      if (logo && h1) h1.outerHTML = `<img class="logo" src="${logo}" alt="Bathtub Gin">`;
+    });
     this.screen.onclick = (e) => {
       const g = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
       if (g === 'continue') this.safehouseOrBriefing();
-      if (g === 'new') { if (!this.save || confirm('Start a new campaign? Your current progress will be replaced.')) { this.save = newCampaign(); this.persist(); this.intro(); } }
+      if (g === 'resume') { const cs = readChapterSave(); const c = CHAPTERS[this.save!.chapter]; if (cs && c) this.play(c, cs.crew, cs.world); }
+      if (g === 'new') { if (!this.save || confirm('Start a new campaign? Your current progress will be replaced.')) this.pickDifficulty(); }
       if (g === 'turf') this.turfMenu();
       if (g === 'help') this.helpScreen();
     };
@@ -66,6 +96,19 @@ export class App {
     this.show(`<div class="box"><h2>How to play</h2>${HELP_HTML}<button class="go" data-go="back">Back</button></div>`);
     this.screen.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-go="back"]')) this.title(); };
   }
+  pickDifficulty() {
+    const card = (d: Difficulty) => `<button class="pick diff ${d === 'normal' ? 'on' : ''}" data-diff="${d}"><b>${DIFFICULTY[d].name}</b><small>${esc(DIFFICULTY[d].desc)}</small></button>`;
+    this.show(`<div class="box"><h2>How hard is the city?</h2><div class="sub">You can change this later in the safehouse</div>
+      <div class="picks">${card('easy')}${card('normal')}${card('hard')}</div>
+      <div class="row-btns"><button class="btn" data-go="back">Back</button></div></div>`);
+    this.screen.onclick = (e) => {
+      const t = e.target as HTMLElement;
+      const d = t.closest<HTMLElement>('[data-diff]')?.dataset.diff as Difficulty | undefined;
+      if (d) { localStorage.removeItem(CHAPTER_KEY); this.save = newCampaign(Date.now(), d); this.persist(); this.intro(); }
+      if (t.closest('[data-go="back"]')) this.title();
+    };
+  }
+
   intro() {
     this.show(`<div class="box">
       <h1>Bathtub Gin</h1><div class="sub">Blood Debt · Port Halloran, 1928</div>
@@ -98,13 +141,16 @@ export class App {
     const rep = s.lastReport && s.lastReport.won ? `<div class="report"><b>Last job:</b> ${s.lastReport.earned >= 0 ? '+' : ''}${money(s.lastReport.earned)} · ${s.lastReport.levelUps.map((l) => `${esc(l.name)} reached level ${l.level}`).join(', ') || 'no level-ups'}${s.lastReport.dead.length ? ` · Lost: ${s.lastReport.dead.map(esc).join(', ')}` : ''}</div>` : '';
     this.show(`<div class="box wide safehouse">
       <h2>The Safehouse</h2><div class="sub">Back room of the Corrado bakery · Cash ${money(s.cash)}</div>${rep}
+      <div class="diffrow">Difficulty: ${(['easy', 'normal', 'hard'] as Difficulty[]).map((d) => `<button class="mini ${(s.difficulty ?? 'normal') === d ? 'gold-btn' : ''}" data-setdiff="${d}">${DIFFICULTY[d].name}</button>`).join('')}</div>
       <nav class="tabs2">${['crew', 'herald', 'garage'].map((t) => `<button data-tab="${t}" class="${t === tab ? 'on' : ''}">${t === 'crew' ? 'Crew' : t === 'herald' ? 'The Herald' : 'Garage'}</button>`).join('')}</nav>
       <div class="tabbody">${tab === 'crew' ? `<div class="rgrid">${roster}</div><p class="hint">Spend skill points, change weapons (paid at the pawn shop) and let people go. Survivors earn experience in every chapter.</p>` : tab === 'herald' ? `<div class="paper"><div class="mast"><h2>Help Wanted</h2><small>The Halloran Herald · classifieds</small></div>${ads || '<p>No ads today.</p>'}</div>` : `<h4>Your cars (max 3 per chapter)</h4>${cars}<h4>Dealer</h4>${shop}`}</div>
       <div class="row-btns"><button class="btn" data-go="title">Title screen</button><button class="go" data-go="brief">Next: Chapter ${next.num} — ${esc(next.title)}</button></div></div>`, 'scroll');
+    this.backdrop('safehouse');
     this.screen.onclick = (e) => {
       const t = e.target as HTMLElement;
       const d = (k: string) => t.closest<HTMLElement>(`[data-${k}]`)?.dataset[k];
       if (d('tab')) return this.safehouse(d('tab'));
+      if (d('setdiff')) { s.difficulty = d('setdiff') as Difficulty; this.persist(); return this.safehouse(tab); }
       if (d('go') === 'title') return this.title();
       if (d('go') === 'brief') return this.briefing();
       const sp = d('sp');
@@ -140,6 +186,7 @@ export class App {
       const cars = [...s.cars.slice(0, 3), ...c.gift];
       this.show(`<div class="box wide briefing">
         <div class="paper brief"><div class="mast"><small>Chapter ${c.num} of ${CHAPTERS.length} · ${esc(c.district)}</small><h2>${esc(c.title)}</h2></div>
+        <div class="brief-art" data-art="briefing-${c.id}"></div>
         ${c.briefing.map((p) => `<p>${esc(p)}</p>`).join('')}
         <div class="adsHead">Objectives</div><ul>${c.objectives.map((o) => `<li>${esc(o.text)}</li>`).join('')}</ul>
         <p class="small">💡 ${esc(c.tip)}</p></div>
@@ -167,15 +214,28 @@ export class App {
     };
   }
 
-  play(c: ChapterDef, crew: string[]) {
+  play(c: ChapterDef, crew: string[], resume?: WorldSave) {
     const s = this.save!;
     this.hide();
     const world = buildChapterWorld(c, s, crew);
+    if (resume) { try { world.restore(resume); } catch { localStorage.removeItem(CHAPTER_KEY); } }
+    else localStorage.removeItem(CHAPTER_KEY);
+    const saveNow = () => {
+      if (world.s.result) return '';
+      const hh = Math.floor(world.s.hour), mm = Math.floor((world.s.hour - hh) * 4) * 15;
+      const when = `day ${world.s.day}, ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      try {
+        localStorage.setItem(CHAPTER_KEY, JSON.stringify({ chapter: c.id, crew, when, world: world.save() } satisfies ChapterSave));
+        return `Saved (${when}).`;
+      } catch { return 'Could not save: the browser storage is full.'; }
+    };
     const sess = new LocalSession(world);
     this.game = new Game(this.root, sess, {
-      title: `Chapter ${c.num}: ${c.title}`, subtitle: c.district, tip: c.tip, quitLabel: 'Abandon chapter',
-      onQuit: () => { if (confirm('Abandon this chapter? Nothing from it will be kept.')) { this.game?.destroy(); this.game = null; this.briefing(); } else this.game?.menu(); },
+      title: `Chapter ${c.num}: ${c.title}`, subtitle: c.district, tip: c.tip, quitLabel: 'Save & quit',
+      onSave: saveNow,
+      onQuit: () => { saveNow(); this.game?.destroy(); this.game = null; this.title(); },
       onEnd: (won, text) => {
+        localStorage.removeItem(CHAPTER_KEY);
         const rep = finishChapter(s, world, c);
         this.persist();
         this.game?.destroy();
@@ -198,6 +258,7 @@ export class App {
         ${rep.dead.length ? `<li class="hot">Buried: ${rep.dead.map(esc).join(', ')}</li>` : ''}
         ${rep.hired.length ? `<li>Joined the family: ${rep.hired.map(esc).join(', ')}</li>` : ''}</ul>` : ''}
       <div class="row-btns">${won ? `<button class="go" data-go="next">${last ? 'Epilogue' : 'To the safehouse'}</button>` : `<button class="btn" data-go="title">Title screen</button><button class="go" data-go="retry">Try again</button>`}</div></div>`);
+    this.backdrop(won ? 'win' : 'lose', 0.85);
     this.screen.onclick = (e) => {
       const g = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
       if (g === 'next') { if (last) this.ending(); else { refreshSafehouseAds(s); this.persist(); this.safehouse(); } }
@@ -264,6 +325,7 @@ export class App {
       ${Array.from({ length: L.ai }, (_, i) => { const f = TURF_FAMILIES[L.players.length + i]; return f ? `<div class="row"><div class="dot" style="background:${f.color}"></div><div class="info"><b>${esc(f.name)}</b> <span class="mute">AI</span></div></div>` : ''; }).join('')}</div>
       <p class="mute">${L.players.length + L.ai} of 4 families · ${L.days} days</p>
       <div class="row-btns"><button class="btn" data-go="leave">Leave</button>${host ? `<button class="go" data-go="start" ${L.players.length + L.ai < 2 ? 'disabled' : ''}>Start the war</button>` : '<span class="mute">Waiting for the host to start…</span>'}</div></div>`);
+    this.backdrop('lobby');
     this.screen.onclick = (e) => {
       const g = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
       if (g === 'start') this.net!.send({ t: 'start' });

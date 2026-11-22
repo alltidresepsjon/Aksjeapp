@@ -9,12 +9,18 @@ function diamond(g: Graphics, x0: number, y0: number, x1: number, y1: number) {
   g.poly([a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y]);
 }
 
+/** A whole block of park (all four corners green). */
+export function isParkBlock(map: MapData, bx: number, by: number): boolean {
+  const x0 = bx * PERIOD + ROAD, y0 = by * PERIOD + ROAD;
+  return [[1, 1], [4, 1], [1, 4], [4, 4], [3, 3]].every(([dx, dy]) => map.tiles[(y0 + dy) * map.w + x0 + dx] === TILE_PARK);
+}
+
 export function drawGround(map: MapData): Graphics {
   const g = new Graphics();
   const rnd = artRng(map.w * 7919 + map.h);
   const { w, h, tiles } = map;
   // base: asphalt everywhere
-  diamond(g, -1, -1, w + 1, h + 1);
+  diamond(g, 0, 0, w, h);
   g.fill({ color: 0x24262a });
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const t = tiles[y * w + x];
@@ -56,9 +62,21 @@ export function drawGround(map: MapData): Graphics {
     }
     // park paths and fountain on plazas
     const cx = x0 + BLOCK / 2, cy = y0 + BLOCK / 2;
-    if (tiles[Math.floor(cy) * w + Math.floor(cx)] === TILE_PARK) {
-      diamond(g, x0, cy - 0.3, x0 + BLOCK, cy + 0.3); g.fill({ color: 0x8a7a5a, alpha: 0.85 });
-      diamond(g, cx - 0.3, y0, cx + 0.3, y0 + BLOCK); g.fill({ color: 0x8a7a5a, alpha: 0.85 });
+    if (isParkBlock(map, bx, by)) {
+      // hedge around the park, a gravel ring walk, paths to the four gates and flower beds
+      const circle = (r: number, n = 40) => { const pts: number[] = []; for (let k = 0; k < n; k++) { const a = (k / n) * Math.PI * 2; const q = toScreen(cx + Math.cos(a) * r, cy + Math.sin(a) * r); pts.push(q.x, q.y); } return pts; };
+      for (const [a0, a1, b0, b1] of [[x0, cx - 0.28, cy - 0.28, cy + 0.28], [cx + 0.28, x0 + BLOCK, cy - 0.28, cy + 0.28]] as const) { diamond(g, a0, b0, a1, b1); g.fill({ color: 0xa8956a }); }
+      for (const [a0, a1, b0, b1] of [[cx - 0.28, cx + 0.28, y0, cy - 0.28], [cx - 0.28, cx + 0.28, cy + 0.28, y0 + BLOCK]] as const) { diamond(g, a0, b0, a1, b1); g.fill({ color: 0xa8956a }); }
+      g.poly(circle(2.25)).fill({ color: 0xa8956a });
+      g.poly(circle(1.7)).fill({ color: 0x46683a });
+      g.poly(circle(0.95)).fill({ color: 0xb8a57a });
+      for (const [dx, dy] of [[1.25, 1.25], [-1.25, 1.25], [1.25, -1.25], [-1.25, -1.25]]) {
+        const q = toScreen(cx + dx * 0.95, cy + dy * 0.95);
+        g.ellipse(q.x, q.y, 16, 8).fill({ color: 0x3a5a2a });
+        for (let k = 0; k < 14; k++) g.circle(q.x + (rnd() - 0.5) * 26, q.y + (rnd() - 0.5) * 12, 1.6).fill({ color: [0xd84a5a, 0xf0d060, 0xe890b0, 0xf4f0e8][k % 4] });
+      }
+      diamond(g, x0 + 0.05, y0 + 0.05, x0 + BLOCK - 0.05, y0 + BLOCK - 0.05);
+      g.stroke({ width: 5, color: 0x2a4422, alpha: 0.95 });
     }
     if (tiles[Math.floor(cy) * w + Math.floor(cx)] === TILE_PLAZA) {
       const p = toScreen(cx, cy);
