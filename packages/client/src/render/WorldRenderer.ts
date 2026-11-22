@@ -540,16 +540,16 @@ export class WorldRenderer {
       }
     }
 
-    // our own people and cars hidden behind a building make it see-through
+    // anyone we can see (our people, enemies, police) hidden behind a building makes it see-through
     const behind: { x: number; y: number; d: number }[] = [];
     for (const u of view.units) {
-      if (u.fam !== this.sess.fam || u.loc !== 'street') continue;
+      if (u.loc !== 'street' || (u.fam !== this.sess.fam && !seen(u.x, u.y))) continue;
       const p = this.sess.lerpPos(u.id, u.x, u.y);
       const sp = toScreen(p.x, p.y);
       behind.push({ x: sp.x, y: sp.y - 20, d: p.x + p.y });
     }
     for (const v of view.vehicles) {
-      if (v.fam !== this.sess.fam || v.dead) continue;
+      if (v.dead || (v.fam !== this.sess.fam && !seen(v.x, v.y))) continue;
       const sp = toScreen(v.x, v.y);
       behind.push({ x: sp.x, y: sp.y - 10, d: v.x + v.y });
     }
