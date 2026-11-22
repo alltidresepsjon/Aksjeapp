@@ -2,11 +2,11 @@
 
 import { Assets, Rectangle, Texture } from 'pixi.js';
 
-interface Entry { file: string; w: number; h: number; frames?: number }
+interface Entry { file: string; w: number; h: number; frames?: number; ax?: number; fw?: number; lit?: string }
 interface Manifest { version: number; buildings: Record<string, Entry>; people: Record<string, Entry>; cars: Record<string, Entry>; ui: Record<string, Entry>; icons?: Record<string, Entry> }
 
 export interface ArtPack {
-  building(type: string, look: string, size: number, seed: number): Texture | null;
+  building(type: string, look: string, size: number, seed: number): BuildingPic | null;
   /** One still picture, or four poses: stand, walk, walk, aim. */
   person(keys: string[], seed: number): Texture[] | null;
   car(model: string, view: 'front' | 'rear'): Texture | null;
@@ -14,6 +14,8 @@ export interface ArtPack {
   icon(name: string): string | null;
   empty: boolean;
 }
+
+export interface BuildingPic { tex: Texture; lit: Texture | null; ax: number; fw: number }
 
 const BASE = '/assets/graphics/';
 let cached: Promise<ArtPack> | null = null;
@@ -32,8 +34,9 @@ async function load(): Promise<ArtPack> {
   const tex = new Map<string, Texture>();
   if (m) {
     const all = [...Object.values(m.buildings), ...Object.values(m.people), ...Object.values(m.cars)];
-    await Promise.all(all.map(async (e) => {
-      try { tex.set(e.file, await Assets.load<Texture>(BASE + e.file)); } catch { /* skip broken file */ }
+    const files = all.flatMap((e) => (e.lit ? [e.file, e.lit] : [e.file]));
+    await Promise.all(files.map(async (f) => {
+      try { tex.set(f, await Assets.load<Texture>(BASE + f)); } catch { /* skip broken file */ }
     }));
   }
   const pickEntry = (group: Record<string, Entry> | undefined, prefix: string, seed: number): Entry | null => {
@@ -61,7 +64,12 @@ async function load(): Promise<ArtPack> {
   };
   return {
     empty: !m || tex.size === 0,
-    building: (type, look, size, seed) => pick(m?.buildings, `type-${type}-${size}`, seed) ?? pick(m?.buildings, `${look}-${size}`, seed),
+    building: (type, look, size, seed) => {
+      const e = pickEntry(m?.buildings, `type-${type}-${size}`, seed) ?? pickEntry(m?.buildings, `${look}-${size}`, seed);
+      const t = e ? tex.get(e.file) : null;
+      if (!e || !t) return null;
+      return { tex: t, lit: e.lit ? tex.get(e.lit) ?? null : null, ax: e.ax ?? 0.5, fw: e.fw ?? e.w };
+    },
     person: (keys, seed) => { for (const k of keys) { const e = pickEntry(m?.people, k, seed); const f = e ? framesOf(e) : null; if (f) return f; } return null; },
     car: (model, view) => pick(m?.cars, `${model}-${view}`, 0),
     ui: (name) => (m?.ui[name] ? BASE + m.ui[name].file : null),

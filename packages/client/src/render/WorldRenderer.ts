@@ -11,7 +11,7 @@ import { BUILDING_RES, INSET, buildingArt, burnedArt, type BuildingArt } from '.
 import { SPRITE_RES, carFrame, corpse, dot, flag, glow, lampPost, personFrames, tree, type PersonLook } from './tex/sprites';
 import { artRng, hex, mix, mul, toScreen, toWorld, TW, TH } from './iso';
 import { propArt, type PropKind } from './tex/props';
-import type { ArtPack } from './artPack';
+import type { ArtPack, BuildingPic } from './artPack';
 import { Ambient } from './ambient';
 import type { Session } from '../session/Session';
 
@@ -355,19 +355,26 @@ export class WorldRenderer {
   }
 
   /** A building drawn from an imported picture: the footprint's lower corner sits on the bottom of the image. */
-  private addCustomBuilding(b: Building, tex: Texture) {
+  private addCustomBuilding(b: Building, pic: BuildingPic) {
+    const tex = pic.tex;
     const s = b.size - INSET * 2;
     const B = toScreen(b.x + INSET + s, b.y + INSET + s);
-    const scale = (s * 64) / tex.width;
+    const scale = (s * 64) / pic.fw;
     const h = tex.height * scale;
     const spr = new Sprite(tex);
-    spr.anchor.set(0.5, 1);
+    spr.anchor.set(pic.ax, 1);
     spr.scale.set(scale);
     spr.position.set(B.x, B.y + 2);
     const depth = b.x + b.y + b.size;
     spr.zIndex = depth;
-    const lit = new Sprite(Texture.EMPTY);
+    const lit = new Sprite(pic.lit ?? Texture.EMPTY);
+    lit.anchor.copyFrom(spr.anchor);
+    lit.scale.copyFrom(spr.scale);
+    lit.position.copyFrom(spr.position);
+    lit.blendMode = 'add';
+    lit.zIndex = depth + 0.001;
     lit.alpha = 0;
+    if (pic.lit) this.objects.addChild(lit);
     const fl = new Sprite(this.flagTex);
     fl.anchor.set(0.05, 1);
     fl.scale.set(1 / SPRITE_RES);
@@ -375,7 +382,8 @@ export class WorldRenderer {
     fl.zIndex = depth + 0.002;
     this.objects.addChild(spr, fl);
     const art: BuildingArt = { day: null as unknown as HTMLCanvasElement, lit: null as unknown as HTMLCanvasElement, ox: 0, oy: 0, w: s * 64, h, flag: { x: 0, y: 0 }, height: Math.max(20, h - s * 32) };
-    const poly = [B.x - s * 32, B.y - h, B.x + s * 32, B.y - h, B.x + s * 32, B.y - s * 16, B.x, B.y, B.x - s * 32, B.y - s * 16];
+    const left = B.x - tex.width * scale * pic.ax, right = left + tex.width * scale;
+    const poly = [left, B.y - h, right, B.y - h, right, B.y - s * 16, B.x, B.y, left, B.y - s * 16];
     this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex: tex, depth, fade: 1, custom: true, poly });
   }
 
@@ -919,7 +927,8 @@ export class WorldRenderer {
     this.root.destroy({ children: true });
     for (const t of this.texCache.values()) for (const x of t) x.destroy(true);
     for (const t of this.carCache.values()) for (const x of t) x.tex.destroy(true);
-    for (const b of this.buildings.values()) { b.dayTex.destroy(true); b.lit.texture.destroy(true); b.burned?.destroy(true); }
+    // imported pictures belong to the shared art pack and must outlive this renderer
+    for (const b of this.buildings.values()) { if (b.custom) continue; b.dayTex.destroy(true); b.lit.texture.destroy(true); b.burned?.destroy(true); }
   }
 }
 

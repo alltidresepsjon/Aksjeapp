@@ -68,6 +68,42 @@ function removeBackground(data, w, h) {
   return true;
 }
 
+/** Removes the thin coloured halo image generators leave around transparent cut-outs. */
+function defringe(data, w, h) {
+  const a = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : data[(y * w + x) * 4 + 3]);
+  const kill = [];
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const v = a(x, y);
+    if (v === 0 || v >= 250) continue;
+    if (a(x - 2, y) < 10 || a(x + 2, y) < 10 || a(x, y - 2) < 10 || a(x, y + 2) < 10) kill.push((y * w + x) * 4 + 3);
+  }
+  for (const i of kill) data[i] = 0;
+}
+
+/** Finds the pavement diamond at the bottom of a building picture: its lowest corner and its width. */
+function footprint(data, w, h, box) {
+  const A = (x, y) => data[(y * w + x) * 4 + 3];
+  const bottom = box.top + box.height - 1;
+  let sum = 0, cnt = 0;
+  for (let x = box.left; x < box.left + box.width; x++) if (A(x, bottom) > 128) { sum += x; cnt++; }
+  const bx = cnt ? sum / cnt : box.left + box.width / 2;
+  let L = bx, R = bx;
+  for (let d = 1; d < box.height / 2; d++) {
+    const y = bottom - d;
+    let l = -1, r = -1;
+    for (let x = box.left; x < box.left + box.width; x++) if (A(x, y) > 128) { if (l < 0) l = x; r = x; }
+    if (l < 0) break;
+    const ok = (span) => span >= 2 * d - 12;
+    if (ok(bx - l)) L = Math.min(L, l);
+    if (ok(r - bx)) R = Math.max(R, r);
+    if (!ok(bx - l) && !ok(r - bx)) break;
+  }
+  let width = R - L;
+  // walls, gates or railings in front hide the pavement: fall back to the whole picture
+  if (width < box.width * 0.75) width = box.width;
+  return { bottomX: bx, width };
+}
+
 function bbox(data, w, h) {
   let x0 = w, y0 = h, x1 = -1, y1 = -1;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -127,6 +163,7 @@ async function main() {
     const img = sharp(join(inbox, f)).ensureAlpha();
     const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
     const removed = t.keepBg ? false : removeBackground(data, info.width, info.height);
+    if (!t.keepBg) defringe(data, info.width, info.height);
     if (t.cat === 'people' && info.width / info.height >= 1.3) {
       const r = await importSheet(data, info.width, info.height, name, t.height);
       if (!r) { console.warn(`  ! ${f}: could not find four poses`); continue; }
@@ -139,12 +176,36 @@ async function main() {
     const box = bbox(data, info.width, info.height);
     if (!box) { console.warn(`  ! ${f}: image is empty after removing the background`); continue; }
     let pipe = sharp(data, { raw: { width: info.width, height: info.height, channels: 4 } }).extract(box);
-    pipe = t.width ? pipe.resize({ width: t.width }) : pipe.resize({ height: t.height });
+    // buildings are scaled by their footprint (the pavement diamond), not by awnings or eaves sticking out
+    let extra = {};
+    if (t.cat === 'buildings') {
+      const fp = footprint(data, info.width, info.height, box);
+      const scale = t.width / fp.width;
+      pipe = pipe.resize({ width: Math.round(box.width * scale) });
+      extra = { ax: +((fp.bottomX - box.left) / box.width).toFixed(4), fw: t.width };
+    } else pipe = t.width ? pipe.resize({ width: t.width }) : pipe.resize({ height: t.height });
     const file = `${name}.png`;
     const buf = await pipe.png({ compressionLevel: 9 }).toBuffer({ resolveWithObject: true });
     await writeFile(join(out, t.cat, file), buf.data);
+    if (t.cat === 'buildings') {
+      // lit windows glow at night: keep only the warm, bright pixels as an additive layer
+      const raw = await sharp(buf.data).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const d = raw.data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        const r = d[i], g = d[i + 1], b = d[i + 2], a = d[i + 3];
+        const warm = r > 170 && g > 110 && r - b > 70 && a > 200;
+        if (warm) { const k = Math.min(1, (r + g - 260) / 200); d[i + 3] = Math.max(0, Math.round(255 * k)); if (d[i + 3] > 40) n++; }
+        else d[i + 3] = 0;
+      }
+      if (n > 50) {
+        const litFile = `${name}-lit.png`;
+        await sharp(d, { raw: { width: raw.info.width, height: raw.info.height, channels: 4 } }).blur(0.6).png({ compressionLevel: 9 }).toFile(join(out, t.cat, litFile));
+        extra.lit = `${t.cat}/${litFile}`;
+      }
+    }
     const key = name.replace(/^(building|person|car|ui|icon)-/, '');
-    manifest[t.cat][key] = { file: `${t.cat}/${file}`, w: buf.info.width, h: buf.info.height };
+    manifest[t.cat][key] = { file: `${t.cat}/${file}`, w: buf.info.width, h: buf.info.height, ...extra };
     ok++;
     console.log(`  ✓ ${f} → ${t.cat}/${file} (${buf.info.width}×${buf.info.height}${removed ? ', background removed' : ''})`);
   }

@@ -6,3 +6,8 @@ coverage/
 .env*
 npm-debug.log*
 /screenshots/
+
+# originals from ChatGPT are large; the imported versions live in packages/client/public/assets/graphics
+art-inbox/*.png
+art-inbox/*.jpg
+art-inbox/*.webp
