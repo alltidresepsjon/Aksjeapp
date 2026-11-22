@@ -4,7 +4,7 @@ import { store } from '../ui/storage';
 import { ask, notice } from '../ui/dialog';
 import {
   CHAPTERS, SPEC_INFO, TURF_FAMILIES, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, buildChapterWorld, finishChapter, hireFromAd,
-  newCampaign, refreshSafehouseAds, spendSkillPoint, DIFFICULTY, type CampaignSave, type ChapterDef, type Difficulty, type LobbyPlayer, type ServerMsg, type StatKey, type WorldSave,
+  newCampaign, refreshSafehouseAds, spendSkillPoint, DIFFICULTY, personalize, type CampaignSave, type ChapterDef, type Difficulty, type LobbyPlayer, type ServerMsg, type StatKey, type WorldSave,
   type VModel, type WeaponId, type Layout, XP_PER_LEVEL,
 } from '@bg/shared';
 import { Game, HELP_HTML } from './Game';
@@ -12,7 +12,12 @@ import { LocalSession } from '../session/LocalSession';
 import { Net, NetSession } from '../session/NetSession';
 import { audio } from '../audio/Audio';
 import { loadArtPack } from '../render/artPack';
-import { $, $$, el, esc, money, statIcons } from '../ui/dom';
+import { $, $$, el, esc, money } from '../ui/dom';
+import { portrait, stars, statStars } from '../ui/portraits';
+
+const FAME_KEY = 'bg-halloffame-v1';
+interface FameEntry { name: string; family: string; difficulty: string; chapters: number; days: number; kills: number; lost: number; earned: number; score: number; date: string; won: boolean }
+function readFame(): FameEntry[] { try { return JSON.parse(store.getItem(FAME_KEY) ?? '[]'); } catch { return []; } }
 
 const SAVE_KEY = 'bg-campaign-v1';
 const CHAPTER_KEY = 'bg-chapter-v1';
@@ -51,6 +56,7 @@ export class App {
 
   private persist() { if (this.save) store.setItem(SAVE_KEY, JSON.stringify(this.save)); }
   private show(html: string, cls = '') {
+    if (this.save) html = personalize(html, this.save);
     this.screen.className = 'screen ' + cls;
     this.screen.style.backgroundImage = '';
     this.screen.innerHTML = html;
@@ -74,6 +80,7 @@ export class App {
           : `<button class="go" data-go="continue">Continue — Chapter ${c.num}: ${esc(c.title)}</button>`; })() : ''}
         <button class="${cont ? 'btn big' : 'go'}" data-go="new">New campaign</button>
         <button class="btn big" data-go="turf">Turf War · online, 2–4 players</button>
+        <button class="btn big" data-go="fame">Hall of Fame</button>
         <button class="btn big" data-go="help">How to play</button>
       </div>
       <p class="credits">An original game about Prohibition, family and revenge. Works on PC and mobile.</p>
@@ -92,6 +99,7 @@ export class App {
       if (g === 'new') { if (!this.save) this.pickDifficulty(); else void ask('Start a new campaign? Your current progress will be replaced.', 'Start over').then((ok) => { if (ok) this.pickDifficulty(); }); }
       if (g === 'turf') { if (import.meta.env.VITE_STATIC) void notice('Turf War is played online against friends and needs the game server. In this test version you can play the whole campaign. To play Turf War, run the game with "npm run dev" (see the README).'); else this.turfMenu(); }
       if (g === 'help') this.helpScreen();
+      if (g === 'fame') this.hallOfFame();
     };
   }
   helpScreen() {
@@ -100,13 +108,25 @@ export class App {
   }
   pickDifficulty() {
     const card = (d: Difficulty) => `<button class="pick diff ${d === 'normal' ? 'on' : ''}" data-diff="${d}"><b>${DIFFICULTY[d].name}</b><small>${esc(DIFFICULTY[d].desc)}</small></button>`;
-    this.show(`<div class="box"><h2>How hard is the city?</h2><div class="sub">You can change this later in the safehouse</div>
+    this.show(`<div class="box"><h2>A New Vendetta</h2><div class="sub">Who are you, and how hard is the city?</div>
+      <div class="cols names"><label class="field">Your first name <input id="nm-first" maxlength="14" value="Nico"></label>
+      <label class="field">Family name <input id="nm-fam" maxlength="14" value="Corrado"></label></div>
+      <p class="mute small">The story follows your names: the son, the family and the bakery.</p>
       <div class="picks">${card('easy')}${card('normal')}${card('hard')}</div>
       <div class="row-btns"><button class="btn" data-go="back">Back</button></div></div>`);
     this.screen.onclick = (e) => {
       const t = e.target as HTMLElement;
       const d = t.closest<HTMLElement>('[data-diff]')?.dataset.diff as Difficulty | undefined;
-      if (d) { store.removeItem(CHAPTER_KEY); this.save = newCampaign(Date.now(), d); this.persist(); this.intro(); }
+      if (d) {
+        const clean = (v: string, def: string) => (v.trim().replace(/[^\p{L}' -]/gu, '').slice(0, 14) || def).replace(/^./, (c) => c.toUpperCase());
+        const first = clean(($('#nm-first', this.screen) as HTMLInputElement).value, 'Nico');
+        const fam = clean(($('#nm-fam', this.screen) as HTMLInputElement).value, 'Corrado');
+        if (this.save && this.save.completed.length) this.recordFame(false);
+        store.removeItem(CHAPTER_KEY);
+        this.save = newCampaign(Date.now(), d, first, fam);
+        this.persist();
+        this.intro();
+      }
       if (t.closest('[data-go="back"]')) this.title();
     };
   }
@@ -130,14 +150,17 @@ export class App {
     const s = this.save!;
     const next = CHAPTERS[s.chapter];
     const roster = s.roster.map((r) => {
-      const stats = (['muscle', 'aim', 'charm', 'stealth'] as StatKey[]).map((k) => `<span class="st">${statIcons[k]} ${r.stats[k]}${r.sp > 0 && r.stats[k] < 10 ? ` <button class="mini" data-sp="${r.id}" data-stat="${k}">+</button>` : ''}</span>`).join('');
+      const icons = { muscle: '💪', aim: '🎯', charm: '🗣', stealth: '🥷' } as const;
+      const stats = r.sp > 0
+        ? (['muscle', 'aim', 'charm', 'stealth'] as StatKey[]).map((k) => `<span class="st">${icons[k]}${stars(r.stats[k], k)}${r.stats[k] < 10 ? ` <button class="mini" data-sp="${r.id}" data-stat="${k}">+</button>` : ''}</span>`).join('')
+        : statStars(r.stats);
       const guns = WEAPON_LIST.map((w) => `<option value="${w}" ${r.weapon === w ? 'selected' : ''}>${WEAPONS[w].name}${r.weapon === w ? '' : ` (${money(WEAPONS[w].price)})`}</option>`).join('');
-      return `<div class="rcard ${r.hero ? 'hero' : ''}"><div class="rtop"><b>${esc(r.name)}</b><span class="role">${esc(r.role)}${r.spec !== 'none' ? ' · ' + SPEC_INFO[r.spec].name : ''}</span></div>
+      return `<div class="rcard ${r.hero ? 'hero' : ''}"><img class="rport" src="${portrait({ id: 0, name: r.name, hero: r.hero, boss: false, cop: false, fam: 'P' }, '#3fbf8a')}" alt=""><div class="rtop"><b>${esc(r.name)}</b><span class="role">${esc(r.role)}${r.spec !== 'none' ? ' · ' + SPEC_INFO[r.spec].name : ''}</span></div>
         <div class="lvl">Level ${r.level} <div class="bars xp"><i style="width:${(100 * r.xp) / (r.level * XP_PER_LEVEL)}%"></i></div>${r.sp ? `<span class="gold">${r.sp} skill point${r.sp > 1 ? 's' : ''}</span>` : ''}</div>
         <div class="rstats">${stats}</div>
         <div class="rfoot"><select data-gun="${r.id}">${guns}</select><span class="mute">${r.wage ? money(r.wage) + '/day' : 'family'} · ${r.kills} kills</span>${r.hero ? '' : `<button class="mini red" data-fire="${r.id}">Fire</button>`}</div></div>`;
     }).join('');
-    const ads = s.ads.map((a) => `<div class="ad"><b>${esc(a.name)}</b> — <i>${esc(a.role)}</i><div>${esc(a.blurb)}</div><div class="s">${statIcons.muscle}${a.stats.muscle} ${statIcons.aim}${a.stats.aim} ${statIcons.charm}${a.stats.charm} ${statIcons.stealth}${a.stats.stealth} · ${WEAPONS[a.weapon].name} · ${money(a.wage)}/day${a.spec !== 'none' ? `<br><i>${esc(SPEC_INFO[a.spec].ability)}</i>` : ''}</div><button data-hire="${a.id}" ${s.cash < a.fee ? 'disabled' : ''}>Hire for ${money(a.fee)}</button></div>`).join('');
+    const ads = s.ads.map((a) => `<div class="ad"><b>${esc(a.name)}</b> — <i>${esc(a.role)}</i><div>${esc(a.blurb)}</div><div class="s">${statStars(a.stats)}<br>${WEAPONS[a.weapon].name} · ${money(a.wage)}/day${a.spec !== 'none' ? `<br><i>${esc(SPEC_INFO[a.spec].ability)}</i>` : ''}</div><button data-hire="${a.id}" ${s.cash < a.fee ? 'disabled' : ''}>Hire for ${money(a.fee)}</button></div>`).join('');
     const cars = s.cars.map((c, i) => `<div class="row"><div class="info"><b>${VEHICLES[c].name}</b><div class="stats">${VEHICLES[c].seats} seats · cargo ${VEHICLES[c].cargo}</div></div><button class="mini" data-sell="${i}">Sell ${money(VEHICLES[c].price * 0.5)}</button></div>`).join('') || '<p class="mute">No cars yet.</p>';
     const shop = VEHICLE_LIST.map((m: VModel) => `<div class="row"><div class="info"><b>${VEHICLES[m].name}</b><div class="stats">${esc(VEHICLES[m].desc)}</div></div><button class="btn" data-buy="${m}" ${s.cash < VEHICLES[m].price || s.cars.length >= 3 ? 'disabled' : ''}>${money(VEHICLES[m].price)}</button></div>`).join('');
     const rep = s.lastReport && s.lastReport.won ? `<div class="report"><b>Last job:</b> ${s.lastReport.earned >= 0 ? '+' : ''}${money(s.lastReport.earned)} · ${s.lastReport.levelUps.map((l) => `${esc(l.name)} reached level ${l.level}`).join(', ') || 'no level-ups'}${s.lastReport.dead.length ? ` · Lost: ${s.lastReport.dead.map(esc).join(', ')}` : ''}</div>` : '';
@@ -182,7 +205,7 @@ export class App {
     const render = () => {
       const crew = s.roster.map((r) => {
         const on = r.hero || picked.has(r.id);
-        return `<button class="pick ${on ? 'on' : ''} ${r.hero ? 'locked' : ''}" data-pick="${r.id}"><b>${esc(r.name)}</b><small>${esc(r.role)}${r.spec !== 'none' ? ' · ' + SPEC_INFO[r.spec].name : ''} · L${r.level}</small><small>${statIcons.muscle}${r.stats.muscle} ${statIcons.aim}${r.stats.aim} ${statIcons.charm}${r.stats.charm} ${statIcons.stealth}${r.stats.stealth} · ${WEAPONS[r.weapon].name}</small></button>`;
+        return `<button class="pick ${on ? 'on' : ''} ${r.hero ? 'locked' : ''}" data-pick="${r.id}"><img class="pport" src="${portrait({ id: 0, name: r.name, hero: r.hero, boss: false, cop: false, fam: 'P' }, '#3fbf8a')}" alt=""><b>${esc(r.name)}</b><small>${esc(r.role)}${r.spec !== 'none' ? ' · ' + SPEC_INFO[r.spec].name : ''} · L${r.level}</small><small>${statStars(r.stats)}</small><small>${WEAPONS[r.weapon].name}</small></button>`;
       }).join('');
       const count = 1 + picked.size;
       const cars = [...s.cars.slice(0, 3), ...c.gift];
@@ -235,6 +258,7 @@ export class App {
     this.game = new Game(this.root, sess, {
       title: `Chapter ${c.num}: ${c.title}`, subtitle: c.district, tip: c.tip, quitLabel: 'Save & quit',
       onSave: saveNow,
+      names: (t: string) => personalize(t, s),
       onQuit: () => { saveNow(); this.game?.destroy(); this.game = null; this.title(); },
       onEnd: (won, text) => {
         store.removeItem(CHAPTER_KEY);
@@ -269,7 +293,31 @@ export class App {
     };
   }
 
+  /** Puts the current campaign into the Hall of Fame. */
+  recordFame(won: boolean) {
+    const s = this.save;
+    if (!s) return;
+    const st = s.stats ?? { days: 0, kills: 0, lost: 0, earned: 0 };
+    const mult = s.difficulty === 'easy' ? 0.8 : s.difficulty === 'hard' ? 1.3 : 1;
+    const chapters = s.completed.length;
+    const score = Math.round((chapters * 1000 + st.earned / 5 + st.kills * 15 - st.lost * 60 - st.days * 5 + (won ? 2000 : 0)) * mult);
+    const list = readFame();
+    list.push({ name: s.roster.find((r) => r.hero)?.name ?? 'Nico Corrado', family: s.familyName ?? 'Corrado', difficulty: DIFFICULTY[s.difficulty ?? 'normal'].name, chapters, days: st.days, kills: st.kills, lost: st.lost, earned: st.earned, score, date: new Date().toISOString().slice(0, 10), won });
+    list.sort((a, b) => b.score - a.score);
+    store.setItem(FAME_KEY, JSON.stringify(list.slice(0, 10)));
+  }
+  hallOfFame() {
+    const list = readFame();
+    const rows = list.map((e, i) => `<tr class="${e.won ? 'won' : ''}"><td>${i + 1}</td><td><b>${esc(e.name)}</b><br><small class="mute">${esc(e.family)} family · ${esc(e.difficulty)} · ${esc(e.date)}</small></td><td>${e.won ? 'Debt paid' : `${e.chapters}/7 chapters`}</td><td>${e.days} days</td><td>${e.kills}</td><td>${money(e.earned)}</td><td class="score">${e.score.toLocaleString('en-US')}</td></tr>`).join('');
+    this.show(`<div class="box wide"><h2>Hall of Fame</h2><div class="sub">The names Port Halloran remembers</div>
+      ${list.length ? `<table class="fame"><tr><th>#</th><th>Boss</th><th>Reached</th><th>Time</th><th>Kills</th><th>Earned</th><th>Score</th></tr>${rows}</table>` : '<p class="center mute">No legends yet. Finish a campaign (or start a new one after a few chapters) to make the list.</p>'}
+      <p class="mute small center">Score: chapters, money earned and enemies dropped count up; lost men and slow days count down. Hard ×1.3, easy ×0.8.</p>
+      <button class="go" data-go="back">Back</button></div>`);
+    this.screen.onclick = (e) => { if ((e.target as HTMLElement).closest('[data-go="back"]')) this.title(); };
+  }
+
   ending() {
+    if (this.save && !this.save.lastReport?.chapter.endsWith('#fame')) { this.recordFame(true); if (this.save.lastReport) this.save.lastReport.chapter += '#fame'; this.persist(); }
     this.show(`<div class="box"><h1>Debt Paid</h1><div class="sub">Port Halloran has a new name to fear</div>
       <div class="story">Victor Kessler's chair is empty and his books are yours. On Foundry Street the bakery lights come back on, and the first loaf of the morning goes to the barber who talked.<br><br>Nobody calls it a robbery anymore.</div>
       <div class="row-btns"><button class="btn" data-go="title">Title screen</button><button class="go" data-go="turf">Play Turf War</button></div></div>`);

@@ -178,6 +178,24 @@ Legg til denne setningen i hver bilprompt:
 | `car-taxi-front.png` | A 1928 checker taxi cab driving towards the bottom-right corner, roof light, chequered band along the side. |
 | `car-taxi-rear.png` | The same taxi seen from behind, driving away towards the top-right corner. |
 
+## 4b. Portretter til kortraden
+
+Portrettene vises på gangsterkortene øverst i spillet og i safehouse. Bildet beholder bakgrunnen. Bruk kvadratisk format og **ingen mal**.
+
+Felles setning:
+> *Head-and-shoulders portrait for a game character card, painted noir 1920s style, warm lamplight from the left, plain dark warm background, looking slightly to the right, square image, no text.*
+
+| Filnavn | Prompt |
+|---|---|
+| `portrait-nico.png` | The hero: a young man of 24 with a pale cream fedora, dark green suit, determined and grieving. (Brukes for helten uansett hvilket navn spilleren velger.) |
+| `portrait-runner.png` | Petey Sullivan, a nervous Doyle bagman: thin, freckles, flat cap. |
+| `portrait-mick.png` | Mick Doyle: lean gunman, scar across the cheek, tan suit, cold eyes. |
+| `portrait-seamus.png` | Seamus Doyle: heavy-set Irish boss, red beard, brown three-piece suit. |
+| `portrait-victor.png` | Victor Kessler: silver-haired crime lord, black tuxedo, dark red carnation. |
+| `portrait-dot.png` | Dot Okafor: sharp-eyed bookkeeper and fixer in her forties, spectacles, cloche hat. |
+
+Vanlige gangstere uten eget portrett får et portrett tegnet i kode.
+
 ## 5. Grensesnitt: åpningsskjerm, skjermbilder og teksturer
 
 Disse bildene **beholder bakgrunnen**, bortsett fra logoen. Du kan bruke en egen ChatGPT-samtale for dem. Lim inn stilbeskrivelsen og si at kamera- og innrammingsreglene ikke gjelder her.

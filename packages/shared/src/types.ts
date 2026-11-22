@@ -35,7 +35,13 @@ export type Order =
   | { k: 'goto'; b: number; act: Act; arg?: string }
   | { k: 'board'; v: number }
   | { k: 'retreat'; b: number }
-  | { k: 'follow'; id: number };
+  | { k: 'follow'; id: number }
+  /** Walk a loop between points, fighting what comes along. */
+  | { k: 'patrol'; pts: Pt[]; i: number }
+  /** Shadow someone at a distance without being noticed. */
+  | { k: 'tail'; id: number; seen: number }
+  /** Hold a spot and fight anyone who comes close. */
+  | { k: 'guard'; x: number; y: number };
 
 /** Scripted behaviour for named NPCs (Mick Doyle's rounds, a bodyguard, a garrison). */
 export type Behavior =
@@ -94,7 +100,27 @@ export interface Unit {
   heldBy: FamId;
   intel: number;
   grab: number;
+  /** Lieutenant this man follows (-1 = nobody). */
+  leader: number;
+  /** Pending court case while in jail. */
+  trial: Trial | null;
 }
+
+export interface Trial {
+  day: number;
+  hour: number;
+  /** Chance of a guilty verdict, 0..1. */
+  risk: number;
+  lawyer: boolean;
+  /** Days in prison if found guilty. */
+  sentence: number;
+  /** Day the sentence ends (set after a guilty verdict). */
+  releaseDay: number;
+}
+
+export interface Obituary { day: number; name: string; fam: FamId; role: string; where: string; by: string }
+export interface Verdict { day: number; name: string; fam: FamId; guilty: boolean; sentence: number }
+export interface Ledger { day: number; income: Record<string, number>; wages: number; managers: number; other: number }
 
 export interface Manager { name: string; skill: number; wage: number; fee: number }
 
@@ -269,4 +295,8 @@ export interface WorldState {
   interrupt: number;
   /** 1 while it rains (fewer witnesses, shorter sight). */
   rain: number;
+  obits: Obituary[];
+  verdicts: Verdict[];
+  /** Money in and out per family for today and yesterday. */
+  ledger: Record<FamId, Ledger[]>;
 }

@@ -14,6 +14,7 @@ import { loadArtPack } from '../render/artPack';
 import { audio } from '../audio/Audio';
 import type { Session } from '../session/Session';
 import { $, $$, clock, el, esc, money, setHtml, statIcons } from '../ui/dom';
+import { portrait, statStars } from '../ui/portraits';
 
 export interface GameOptions {
   title: string;
@@ -22,11 +23,13 @@ export interface GameOptions {
   onEnd: (won: boolean, text: string) => void;
   onQuit: () => void;
   quitLabel: string;
+  /** The player's own names for the hero and the family. */
+  names?: (text: string) => string;
   /** Saves the game; returns a short confirmation. Only for the campaign. */
   onSave?: () => string;
 }
 
-type Mode = 'none' | 'kidnap' | 'routeFrom' | 'routeTo' | 'box';
+type Mode = 'none' | 'kidnap' | 'routeFrom' | 'routeTo' | 'box' | 'patrol' | 'guard' | 'tail';
 
 const STANCES: { k: Stance; label: string; hint: string }[] = [
   { k: 'passive', label: 'Passive', hint: 'Hold fire. Sneak past, stay unnoticed.' },
@@ -81,6 +84,7 @@ export class Game {
             <div id="adv-tut"></div>
             <div id="adv-log"></div>
           </div>
+          <div id="cards"></div>
           <div id="maptools">
             <button data-tool="all" title="Select whole crew (A)">👥 All</button>
             <button data-tool="box" title="Drag a box to select (or Shift+drag)">⬚ Box</button>
@@ -307,6 +311,25 @@ export class Game {
     audio.unlock();
     const hit = this.renderer.pick(x, y);
     const v = this.sess.view();
+    if (this.mode === 'tail') {
+      if (hit.k === 'unit' && !this.mine(hit.u)) { this.cmd({ c: 'tail', units: [...this.sel], target: hit.u.id }); this.toast(`Tailing ${hit.u.name}. They hold fire and keep their distance.`); this.setMode('none'); }
+      else this.toast('Tap the rival to shadow.');
+      return;
+    }
+    if (this.mode === 'guard') {
+      const t = hit.k === 'building' ? hit.b.door : hit.k === 'unit' ? hit.u : hit.k === 'vehicle' ? hit.v : hit;
+      this.cmd({ c: 'guard', units: [...this.sel], x: t.x, y: t.y });
+      this.setMode('none');
+      return;
+    }
+    if (this.mode === 'patrol') {
+      const t = hit.k === 'building' ? hit.b.door : hit.k === 'unit' ? hit.u : hit.k === 'vehicle' ? hit.v : hit;
+      this.patrolPts.push({ x: t.x, y: t.y });
+      this.renderer.float(t.x, t.y, String(this.patrolPts.length), 0xd8b25a);
+      this.setMode('patrol');
+      if (this.patrolPts.length >= 6) this.startPatrol();
+      return;
+    }
     if (this.mode === 'kidnap') {
       if (hit.k === 'unit' && !this.mine(hit.u)) { this.cmd({ c: 'kidnap', units: [...this.sel], target: hit.u.id }); this.setMode('none'); }
       else this.toast('Tap a rival gangster to kidnap.');
@@ -392,9 +415,52 @@ export class Game {
     this.refresh(true);
   }
   private multi = false;
+  private patrolPts: { x: number; y: number }[] = [];
+  private lastCard = { id: -1, t: 0 };
+  private paperTab = 'news';
+
+  /** The row of gang cards along the top of the map. */
+  private cards(v: ViewState) {
+    const fam = v.families[this.sess.fam];
+    const crew = v.units.filter((u) => u.fam === this.sess.fam && !u.cop && !u.guard && u.loc !== 'dead' && u.loc !== 'held');
+    // lieutenants first, their men right after them, then everyone else
+    const order: Unit[] = [];
+    for (const u of crew.filter((x) => x.hero)) order.push(u);
+    for (const u of crew.filter((x) => !x.hero && x.leader < 0)) order.push(u);
+    const out: Unit[] = [];
+    for (const u of order) { out.push(u); for (const m of crew.filter((x) => x.leader === u.id)) out.push(m); }
+    for (const u of crew) if (!out.includes(u)) out.push(u);
+    const html = out.map((u) => {
+      const custom = this.pack?.ui('portrait-' + (u.hero && v.mode === 'campaign' ? 'nico' : u.tag || u.rosterId || 'x'));
+      const img = custom ?? portrait(u, fam.color);
+      const hp = Math.max(0, u.hp / u.maxHp);
+      const where = u.loc === 'jail' ? '⛓' : u.loc === 'car' ? '🚗' : u.loc === 'inside' ? '🏠' : '';
+      const fighting = u.target >= 0 && v.time - u.lastShot < 2;
+      const men = crew.filter((x) => x.leader === u.id).length;
+      return `<button class="card ${this.sel.has(u.id) ? 'sel' : ''} ${u.leader >= 0 ? 'follower' : ''} ${fighting ? 'fight' : ''} ${u.loc === 'jail' ? 'jailed' : ''}" data-card="${u.id}" title="${esc(u.name)} · ${esc(u.role)}">
+        <img src="${img}" alt=""><span class="nm">${esc(u.name.split(' ')[0])}</span>
+        <span class="hp"><i style="width:${hp * 100}%;background:${hp > 0.4 ? '#7be08f' : '#ff6b5a'}"></i></span>
+        ${where ? `<span class="wh">${where}</span>` : ''}${men ? `<span class="lt">👑${men}</span>` : ''}${u.sp ? '<span class="spdot"></span>' : ''}
+      </button>`;
+    }).join('');
+    setHtml($('#cards', this.root), html);
+  }
+  private startPatrol() {
+    if (this.patrolPts.length < 2) { this.toast('Tap at least two spots for a patrol.'); return; }
+    this.cmd({ c: 'patrol', units: [...this.sel], pts: this.patrolPts });
+    this.patrolPts = [];
+    this.setMode('none');
+  }
   private setMode(m: Mode) {
+    if (m !== 'patrol') this.patrolPts = m === 'none' ? [] : this.patrolPts;
     this.mode = m;
     const hint = $('#modehint', this.root);
+    if (m === 'patrol' || m === 'guard' || m === 'tail') {
+      const t = m === 'patrol' ? `Patrol: tap ${this.patrolPts.length ? 'the next spot' : 'the spots to walk between'} (${this.patrolPts.length}/6). ` : m === 'guard' ? 'Guard: tap the spot or building to hold. ' : 'Tail: tap the rival to shadow. ';
+      hint.innerHTML = `${esc(t)}${m === 'patrol' && this.patrolPts.length >= 2 ? '<button data-mode-go>Start patrol</button>' : ''}<button data-mode-cancel>Cancel</button>`;
+      hint.style.display = 'block';
+      return;
+    }
     const text = m === 'kidnap' ? 'Kidnap: tap the rival to grab. One of our cars must be close by.' : m === 'routeFrom' ? 'Supply route: tap where to LOAD (your distillery, or a smugglers\' pier at night).' : m === 'routeTo' ? 'Supply route: now tap the speakeasy to deliver to.' : m === 'box' ? 'Drag a box around the people you want.' : '';
     hint.innerHTML = text ? `${esc(text)} <button data-mode-cancel>Cancel</button>` : '';
     hint.style.display = text ? 'block' : 'none';
@@ -453,7 +519,32 @@ export class Game {
       if (b.dataset.tool === 'box') this.setMode(this.mode === 'box' ? 'none' : 'box');
       if (b.dataset.tool === 'hero') this.findHero();
     };
-    $('#modehint', r).onclick = (e) => { if ((e.target as HTMLElement).closest('[data-mode-cancel]')) this.setMode('none'); };
+    $('#modehint', r).onclick = (e) => {
+      if ((e.target as HTMLElement).closest('[data-mode-cancel]')) this.setMode('none');
+      if ((e.target as HTMLElement).closest('[data-mode-go]')) this.startPatrol();
+    };
+    $('#cards', r).addEventListener('click', (e) => {
+      const c = (e.target as HTMLElement).closest<HTMLElement>('[data-card]');
+      if (!c) return;
+      audio.unlock();
+      const id = +c.dataset.card!;
+      const v = this.sess.view();
+      const u = v.units.find((x) => x.id === id);
+      if (!u) return;
+      const now = performance.now();
+      if (this.lastCard.id === id && now - this.lastCard.t < 350) {
+        const p = u.loc === 'inside' ? v.buildings[u.bld]?.door ?? u : u.loc === 'car' ? v.vehicles.find((x) => x.id === u.car) ?? u : u;
+        this.renderer.centerOnTile(p.x, p.y);
+      } else if ((e as MouseEvent).shiftKey || this.multi) { if (this.sel.has(id)) this.sel.delete(id); else this.sel.add(id); }
+      else {
+        this.sel.clear(); this.sel.add(id);
+        // picking a lieutenant picks his men too
+        for (const x of v.units) if (x.leader === id && x.fam === this.sess.fam) this.sel.add(x.id);
+      }
+      this.lastCard = { id, t: now };
+      this.selVehicle = -1;
+      this.refresh(true);
+    });
     $('#tabs', r).onclick = (e) => {
       const b = (e.target as HTMLElement).closest('button');
       if (!b) return;
@@ -522,6 +613,14 @@ export class Game {
       case 'stance': this.cmd({ c: 'stance', units, stance: t.dataset.v as Stance }); return;
       case 'retreat': { const on = t.dataset.v === '1'; this.cmd({ c: 'retreat', units, on }); return; }
       case 'kidnap': this.setMode('kidnap'); return;
+      case 'patrol': this.patrolPts = []; this.setMode('patrol'); return;
+      case 'guardHere': this.setMode('guard'); return;
+      case 'tail': this.setMode('tail'); return;
+      case 'squad': this.cmd({ c: 'lieutenant', units: [...this.sel], leader: id }); return;
+      case 'unsquad': this.cmd({ c: 'lieutenant', units: [...this.sel], leader: -1 }); return;
+      case 'lawyer': this.cmd({ c: 'lawyer', unit: id }); return;
+      case 'rumor': this.cmd({ c: 'rumor', fam: t.dataset.v! }); return;
+      case 'ptab': this.paperTab = t.dataset.v!; break;
       case 'act': this.cmd({ c: 'act', units, b: this.selBuilding, act: t.dataset.v as Act, arg: t.dataset.arg }); return;
       case 'manager': this.cmd({ c: 'manager', b: this.selBuilding, idx: id }); return;
       case 'fireManager': this.cmd({ c: 'fireManager', b: this.selBuilding }); return;
@@ -575,6 +674,7 @@ export class Game {
     else if (this.tab === 'paper') this.paperPane(v);
     else this.goalsPane(v);
     this.selBar(v);
+    this.cards(v);
     this.applyIcons();
     this.arrows(v);
     this.tutorial(v);
@@ -675,7 +775,7 @@ export class Game {
     const cur = steps[this.tutStep];
     const el2 = $('#adv-tut', this.root);
     el2.className = 'show';
-    setHtml(el2, `<small>Lesson ${this.tutStep + 1} of ${steps.length}</small>${esc(cur.text)}<button class="skip" data-tut="skip">Skip the lessons</button>`);
+    setHtml(el2, `<small>Lesson ${this.tutStep + 1} of ${steps.length}</small>${esc(this.opts.names ? this.opts.names(cur.text) : cur.text)}<button class="skip" data-tut="skip">Skip the lessons</button>`);
     this.glow(cur.glow ?? null);
   }
   private glowSel: string | null = null;
@@ -756,7 +856,11 @@ export class Game {
       if (u.loc === 'jail') {
         const fixer = crew.some((x) => x.spec === 'fixer' && x.loc !== 'jail');
         const bail = Math.round(u.bail * (fixer ? 0.5 : 1));
-        return `<div class="row jail"><div class="dot cop"></div><div class="info"><b>${esc(u.name)}</b><span class="role">${esc(u.role)}</span><div class="stats">Bail ${money(bail)}${fixer ? ' (fixer discount)' : ''}</div></div><button class="btn gold" data-a="bail" data-id="${u.id}" ${fam.money < bail ? 'disabled' : ''}>Bail</button></div>`;
+        const t = u.trial;
+        if (t && t.releaseDay) return `<div class="row jail"><div class="dot cop"></div><div class="info"><b>${esc(u.name)}</b><span class="role">${esc(u.role)}</span><div class="stats">Sentenced · out on day ${t.releaseDay}. A fixer or a bribed judge can still get him out.</div></div></div>`;
+        const lawyerCost = 150 + u.level * 30;
+        const trialTxt = t ? `Trial day ${t.day}, 10:00 · ${Math.round(Math.max(0, t.risk - (t.lawyer ? 0.25 : 0)) * 100)}% guilty${t.lawyer ? ' · lawyer hired' : ''}` : '';
+        return `<div class="row jail"><div class="dot cop"></div><div class="info"><b>${esc(u.name)}</b><span class="role">${esc(u.role)}</span><div class="stats">Bail ${money(bail)}${fixer ? ' (fixer discount)' : ''}<br>${trialTxt}</div>${t && !t.lawyer ? `<button class="mini" data-a="lawyer" data-id="${u.id}" ${fam.money < lawyerCost ? 'disabled' : ''}>Hire a lawyer ${money(lawyerCost)}</button>` : ''}</div><button class="btn gold" data-a="bail" data-id="${u.id}" ${fam.money < bail ? 'disabled' : ''}>Bail</button></div>`;
       }
       const sel = this.sel.has(u.id);
       const spec = u.spec !== 'none' ? `<span class="spec">${SPEC_INFO[u.spec].name}</span>` : '';
@@ -764,7 +868,7 @@ export class Game {
       return `<div class="row ${sel ? 'sel' : ''}" data-a="sel" data-id="${u.id}">
         <div class="dot" style="background:${fam.color}${u.hero ? ';box-shadow:0 0 0 2px #ffd36b' : ''}"></div>
         <div class="info"><b>${esc(u.name)}</b><span class="role">${esc(u.role)} · L${u.level}</span>${spec}
-          <div class="stats">${statIcons.muscle}${u.stats.muscle} ${statIcons.aim}${u.stats.aim} ${statIcons.charm}${u.stats.charm} ${statIcons.stealth}${u.stats.stealth} · ${WEAPONS[u.weapon].name}${u.wage ? ` · ${money(u.wage)}/day` : ''}${u.sp && !sel ? ` · <span class="gold">+${u.sp} SP</span>` : ''}</div>
+          <div class="stats">${statStars(u.stats)}<br>${WEAPONS[u.weapon].name}${u.wage ? ` · ${money(u.wage)}/day` : ''}${u.sp && !sel ? ` · <span class="gold">+${u.sp} SP</span>` : ''}${u.leader >= 0 ? ` · ↳ ${esc(v.units.find((x) => x.id === u.leader)?.name.split(' ')[0] ?? '')}` : ''}${crew.some((x) => x.leader === u.id) ? ` · 👑 ${crew.filter((x) => x.leader === u.id).length} men` : ''}</div>
           <div class="bars"><i style="width:${(100 * u.hp) / u.maxHp}%"></i></div><div class="bars heat"><i style="width:${u.heat}%"></i></div>${skill}
         </div>
         <div class="st">${st}${u.stance !== 'defensive' ? `<br><small>${u.stance}</small>` : ''}</div>
@@ -777,18 +881,72 @@ export class Game {
       ${rows}
       ${cars ? `<h4 class="sub">Cars</h4>${cars}` : ''}
       ${hostages ? `<h4 class="sub">In the cellar</h4>${hostages}` : ''}
-      <p class="hint">Tap people to select them, then tap a building or a spot on the map. Tap a rival to attack. Right-click or long-press does the obvious thing. 💪 Muscle: health and muscling in · 🎯 Aim: hitting the target · 🗣 Charm: extortion and deals · 🥷 Stealth: less heat, harder to spot.</p>`);
+      <p class="hint">Tap people to select them, then tap a building or a spot on the map. Tap a rival to attack. Right-click or long-press does the obvious thing. 💪 Muscle: health and muscling in · 🎯 Aim: hitting the target · 🗣 Charm: extortion and deals · 🥷 Stealth: less heat, harder to spot. Select several and press 👑 to put them under a lieutenant.</p>`);
   }
 
   private paperPane(v: ViewState) {
     const fam = v.families[this.sess.fam];
-    setHtml($('#p-paper', this.root), `<div class="paper"><div class="mast"><h2>The Halloran Herald</h2><small>Port Halloran · Day ${v.day} · Two cents</small></div>
-      ${v.news.slice(0, 14).map((n) => `<div class="news ${n.big ? 'big' : ''}"><em>Day ${n.day}, ${String(n.hour).padStart(2, '0')}:00</em>${esc(n.text)}</div>`).join('')}
-      <div class="adsHead">Help Wanted · Situations</div>
-      ${v.ads.length ? v.ads.map((a) => `<div class="ad"><b>${esc(a.name)}</b> — <i>${esc(a.role)}</i><div>${esc(a.blurb)}</div>
-        <div class="s">${statIcons.muscle}${a.stats.muscle} ${statIcons.aim}${a.stats.aim} ${statIcons.charm}${a.stats.charm} ${statIcons.stealth}${a.stats.stealth} · ${WEAPONS[a.weapon].name} · Wage ${money(a.wage)}/day${a.spec !== 'none' ? `<br><i>${esc(SPEC_INFO[a.spec].ability)}</i>` : ''}</div>
-        <button data-a="hire" data-ad="${a.id}" ${fam.money < a.fee ? 'disabled' : ''}>Hire for ${money(a.fee)}</button></div>`).join('') : '<p class="center"><i>No new notices today. Check tomorrow\'s edition.</i></p>'}
-      <p class="small">Managers are hired straight from each building's menu. Guns are sold at the pawn shop.</p></div>`);
+    const tabs: [string, string][] = [['news', 'Headlines'], ['trials', 'Trials'], ['obits', 'Obituaries'], ['wanted', 'Most Wanted'], ['money', 'Finances'], ['rumors', 'Rumours'], ['ads', 'Help Wanted']];
+    const nav = `<nav class="ptabs">${tabs.map(([k, l]) => `<button data-a="ptab" data-v="${k}" class="${this.paperTab === k ? 'on' : ''}">${l}</button>`).join('')}</nav>`;
+    let body = '';
+    const famName = (id: string) => (id === 'police' ? 'Police' : v.families[id]?.name ?? id);
+    const famColor = (id: string) => v.families[id]?.color ?? '#4d8cff';
+    switch (this.paperTab) {
+      case 'news':
+        body = v.news.slice(0, 16).map((n) => `<div class="news ${n.big ? 'big' : ''}"><em>Day ${n.day}, ${String(n.hour).padStart(2, '0')}:00</em>${esc(n.text)}</div>`).join('');
+        break;
+      case 'trials': {
+        const mine = v.units.filter((u) => u.fam === this.sess.fam && u.loc === 'jail');
+        body = `<div class="adsHead">On the docket</div>` + (mine.length ? mine.map((u) => {
+          const t = u.trial;
+          if (!t) return `<div class="news"><b>${esc(u.name)}</b>: held without charge</div>`;
+          if (t.releaseDay) return `<div class="news"><b>${esc(u.name)}</b>: serving ${t.sentence} days, out on day ${t.releaseDay}</div>`;
+          const risk = Math.round(Math.max(0, t.risk - (t.lawyer ? 0.25 : 0)) * 100);
+          const cost = 150 + u.level * 30;
+          return `<div class="news"><b>${esc(u.name)}</b>: trial on day ${t.day} at 10:00 · chance of a guilty verdict about ${risk}%${t.lawyer ? ' · defended by Counsellor Abernathy' : ''}
+            <div class="ptools">${t.lawyer ? '' : `<button data-a="lawyer" data-id="${u.id}" ${fam.money < cost ? 'disabled' : ''}>Hire a lawyer ${money(cost)}</button>`}<button data-a="bail" data-id="${u.id}" ${fam.money < u.bail ? 'disabled' : ''}>Pay bail ${money(u.bail)}</button></div></div>`;
+        }).join('') : '<p class="center"><i>None of yours before the court.</i></p>') +
+          `<div class="adsHead">Verdicts</div>` + (v.verdicts.length ? v.verdicts.slice(0, 12).map((x) => `<div class="news"><em>Day ${x.day}</em>${esc(x.name)} (${esc(famName(x.fam))}): ${x.guilty ? `<b>guilty</b>, ${x.sentence} days` : 'not guilty'}</div>`).join('') : '<p class="center"><i>The court has been quiet.</i></p>') +
+          `<p class="small">A lawyer cuts the chance of a guilty verdict. A bribed judge releases everyone and silences witnesses.</p>`;
+        break;
+      }
+      case 'obits':
+        body = v.obits.length ? v.obits.slice(0, 20).map((o) => `<div class="news"><em>Day ${o.day}</em><b>${esc(o.name)}</b>, ${esc(o.role.toLowerCase())}${o.fam !== 'police' ? ` of the ${esc(famName(o.fam))}` : ''}, on ${esc(o.where)}. ${o.by !== 'unknown' ? `Witnesses blame ${esc(o.by)}.` : ''}</div>`).join('') : '<p class="center"><i>No deaths reported. Yet.</i></p>';
+        break;
+      case 'wanted': {
+        const vis = this.sess.vis();
+        const seen = (x: number, y: number) => !vis || vis[Math.floor(y) * this.sess.map.w + Math.floor(x)] === 1;
+        const list = v.units.filter((u) => !u.cop && u.loc !== 'dead' && u.loc !== 'held' && (u.fam === this.sess.fam || ((u.loc === 'street' || u.loc === 'car') && seen(u.x, u.y))) && u.heat > 5).sort((a, b) => b.heat - a.heat).slice(0, 10);
+        body = `<p class="small">From 50 heat the police hunt a man down.</p>` + (list.length ? list.map((u, i) => `<div class="news wanted"><span class="rank">${i + 1}</span><span class="dot" style="background:${famColor(u.fam)}"></span><b>${esc(u.name)}</b> · ${esc(famName(u.fam))}<span class="heatbar"><i style="width:${Math.round(u.heat / 5) * 5}%"></i></span>${u.heat >= 50 ? ' <b class="hot">WANTED</b>' : ''}</div>`).join('') : '<p class="center"><i>The streets are quiet.</i></p>');
+        break;
+      }
+      case 'money': {
+        const L = v.ledger[this.sess.fam] ?? [];
+        const day = (l: (typeof L)[number] | undefined, title: string) => {
+          if (!l) return `<div class="adsHead">${title}</div><p class="center"><i>No figures yet.</i></p>`;
+          const inc = Object.entries(l.income).sort((a, b) => b[1] - a[1]);
+          const total = inc.reduce((a, [, n]) => a + n, 0);
+          return `<div class="adsHead">${title}</div><table class="ledger">${inc.map(([k, n]) => `<tr><td>${esc(k)}</td><td>${money(n)}</td></tr>`).join('')}
+            <tr class="sum"><td>Income</td><td>${money(total)}</td></tr><tr><td>Wages</td><td>−${money(l.wages)}</td></tr><tr><td>Managers hired</td><td>−${money(l.managers)}</td></tr><tr><td>Purchases, bribes, lawyers</td><td>−${money(l.other)}</td></tr>
+            <tr class="sum"><td>Net</td><td>${money(total - l.wages - l.managers - l.other)}</td></tr></table>`;
+        };
+        body = day(L[0], `Day ${L[0]?.day ?? v.day}`) + day(L[1], 'Yesterday') + `<p class="small">Cash in hand: ${money(fam.money)}</p>`;
+        break;
+      }
+      case 'rumors': {
+        const cost = 100 + v.day * 10;
+        const rivals = v.order.map((id) => v.families[id]).filter((f) => f && f.id !== this.sess.fam && !f.eliminated);
+        body = `<p>A few dollars in the right pocket and the street talks: where their boss is, how many men they have out. Their people show on your map for six hours.</p>` +
+          rivals.map((f) => `<div class="news"><span class="dot" style="background:${f.color}"></span><b>${esc(f.name)}</b><div class="ptools"><button data-a="rumor" data-v="${f.id}" ${fam.money < cost ? 'disabled' : ''}>Ask around ${money(cost)}</button></div></div>`).join('');
+        break;
+      }
+      default:
+        body = `<div class="adsHead">Help Wanted · Situations</div>` + (v.ads.length ? v.ads.map((a) => `<div class="ad"><b>${esc(a.name)}</b> — <i>${esc(a.role)}</i><div>${esc(a.blurb)}</div>
+        <div class="s">${statStars(a.stats)}<br>${WEAPONS[a.weapon].name} · Wage ${money(a.wage)}/day${a.spec !== 'none' ? `<br><i>${esc(SPEC_INFO[a.spec].ability)}</i>` : ''}</div>
+        <button data-a="hire" data-ad="${a.id}" ${fam.money < a.fee ? 'disabled' : ''}>Hire for ${money(a.fee)}</button></div>`).join('') : '<p class="center"><i>No new notices today. Check tomorrow\'s edition.</i></p>') +
+          `<p class="small">Managers are hired straight from each building's menu. Guns are sold at the pawn shop.</p>`;
+    }
+    setHtml($('#p-paper', this.root), `<div class="paper"><div class="mast"><h2>The Halloran Herald</h2><small>Port Halloran · Day ${v.day} · Two cents</small></div>${nav}${body}</div>`);
   }
 
   private goalsPane(v: ViewState) {
@@ -807,7 +965,7 @@ export class Game {
       }).join('');
       if (this.opts.tip) html += `<p class="hint">💡 ${esc(this.opts.tip)}</p>`;
       { const f = v.families[this.sess.fam]; const l = repLevel(f.rep); html += `<div class="mis"><h4>Your name on the street: ${esc(l.name)} (${Math.round(f.rep)})</h4><p>${esc(l.desc)} Buying, running clean businesses and donating to the church raise it; muscle, fire, bank jobs and dead policemen lower it.</p></div>`; }
-      html += `<p class="hint">Keep Nico alive and hold your headquarters. If either is lost, the chapter is lost.</p>`;
+      html += `<p class="hint">${esc((this.opts.names ?? ((x: string) => x))('Keep Nico alive and hold your headquarters. If either is lost, the chapter is lost.'))}</p>`;
     }
     setHtml($('#p-goals', this.root), html);
   }
@@ -834,12 +992,22 @@ export class Game {
     const stance = us.every((u) => u.stance === us[0].stance) ? us[0].stance : '';
     const retreat = us.every((u) => u.retreat);
     const specs = [...new Set(us.map((u) => u.spec).filter((s) => s !== 'none'))];
-    const title = us.length === 1 ? `${esc(us[0].name)} <span class="mute">· ${esc(us[0].role)} · ${WEAPONS[us[0].weapon].name}</span>` : `${us.length} selected <span class="mute">· ${us.map((u) => esc(u.name.split(' ')[0])).join(', ')}</span>`;
+    // squads: the most senior selected man leads the rest
+    let squadBtn = '';
+    const lead = us.slice().sort((a, b) => (b.hero ? 99 : b.level) - (a.hero ? 99 : a.level))[0];
+    if (us.length >= 2 && lead && (lead.level >= 2 || lead.hero) && us.some((u) => u.id !== lead.id && u.leader !== lead.id)) squadBtn = `<button class="btn gold" data-a="squad" data-id="${lead.id}" title="The others follow ${esc(lead.name)} and fight alongside him">👑 Squad under ${esc(lead.name.split(' ')[0])}</button>`;
+    else if (us.some((u) => u.leader >= 0)) squadBtn = `<button class="btn" data-a="unsquad" title="They work on their own again">Leave squad</button>`;
+    else if (us.length >= 2) squadBtn = `<span class="mute small">A lieutenant needs level 2.</span>`;
+    const title = us.length === 1 ? `${esc(us[0].name)} <span class="mute">· ${esc(us[0].role)} · L${us[0].level} · ${WEAPONS[us[0].weapon].name}</span> ${statStars(us[0].stats)}` : `${us.length} selected <span class="mute">· ${us.map((u) => esc(u.name.split(' ')[0])).join(', ')}</span>`;
     setHtml(bar, `<div class="selhead"><b>${title}</b>${specs.length ? `<div class="mute small">${specs.map((s) => esc(SPEC_INFO[s].ability)).join(' ')}</div>` : ''}</div>
       <div class="acts">
         <div class="seg" title="Aggression">${STANCES.map((s) => `<button class="${stance === s.k ? 'on' : ''}" data-a="stance" data-v="${s.k}" title="${esc(s.hint)}">${s.label}</button>`).join('')}</div>
         <button class="btn ${retreat ? 'gold' : ''}" data-a="retreat" data-v="${retreat ? 0 : 1}" title="Fall back to the nearest of our buildings below 30% health">Flee when hurt ${retreat ? 'ON' : 'OFF'}</button>
+        <button class="btn" data-a="patrol" title="Walk a loop between spots you tap, fighting what comes along">Patrol…</button>
+        <button class="btn" data-a="guardHere" title="Hold a spot or a door and fight anyone who comes close">Guard…</button>
+        <button class="btn" data-a="tail" title="Shadow a rival without being seen and report where he goes">Tail…</button>
         <button class="btn red" data-a="kidnap" title="Grab a rival and drive him to our headquarters">Kidnap…</button>
+        ${squadBtn}
         <button class="btn" data-a="none">✕</button>
       </div>`);
     bar.classList.add('show');

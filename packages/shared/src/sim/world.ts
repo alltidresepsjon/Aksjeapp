@@ -129,7 +129,7 @@ export class World {
       news: [], ads: [], events: [], evId: 1,
       objectives: init.objectives.map((o): Objective => ({ id: o.id, text: o.text, def: o.def, optional: !!o.optional, after: o.after ?? '', done: false, failed: false, progress: '' })),
       script: init.script.map((t) => ({ ...t, fired: false })),
-      flags: {}, nextId: 1, copTimer: 0, result: null, fog: init.fog, timeLimitDay: init.timeLimitDay ?? 0, interrupt: 0, rain: 0,
+      flags: {}, nextId: 1, copTimer: 0, result: null, fog: init.fog, timeLimitDay: init.timeLimitDay ?? 0, interrupt: 0, rain: 0, obits: [], verdicts: [], ledger: {},
     };
     for (const b of buildings) this.refreshCandidates(b);
     const human = init.families.find((f) => f.human);
@@ -293,6 +293,8 @@ export class World {
       if (f.nextAi <= 0) { f.nextAi = 2; runAi(this, f); }
     }
     this.behaviors();
+    if (s.tick % 3 === 0) this.followLeaders();
+    if (s.tick % 10 === 0) this.trials();
     for (const u of s.units) if (u.loc === 'street') this.tickUnit(u);
     for (const v of s.vehicles) if (!v.dead) this.tickVehicle(v);
     this.combat();
@@ -334,7 +336,7 @@ export class World {
         if (b.racket === 'still' && (h === 21 || h === 0 || h === 3)) b.stock = Math.min(24, b.stock + 1);
         inc += (r.income / 8) * mult * mgr;
       }
-      if (inc > 0) { fam.money += inc; earned[fam.id] = (earned[fam.id] ?? 0) + inc; }
+      if (inc > 0) { fam.money += inc; earned[fam.id] = (earned[fam.id] ?? 0) + inc; this.book(fam.id, 'income', inc, b.name); }
     }
     for (const fid of Object.keys(earned)) {
       const hq = this.hqOf(fid);
@@ -359,6 +361,7 @@ export class World {
       for (const u of s.units) if (u.fam === f.id && this.active(u)) wages += u.wage;
       for (const b of s.buildings) if (b.owner === f.id && b.manager) wages += b.manager.wage;
       f.money -= wages;
+      this.book(f.id, 'wages', wages);
       // clean businesses earn goodwill, rackets cost a little; everything drifts slowly back to neutral
       const owned = s.buildings.filter((b) => b.owner === f.id && !b.burned);
       const clean = owned.filter((b) => !b.racket && BTYPES[b.type].business && b.type !== 'hq').length;
@@ -414,6 +417,114 @@ export class World {
       this.ev({ k: 'siren', x: b.door.x, y: b.door.y } as GameEvent);
       this.news(`DRY RAID! Police smash a ${RACKETS[b.racket].name.toLowerCase()} behind ${b.name} on ${b.street}`, true, f.id);
       if (f.human) this.toast(f.id, `Police raided your ${RACKETS[b.racket].name} at ${b.name}. Closed for 2 days.`, b.door, true);
+    }
+  }
+
+  /** Write money in or out into today's ledger. */
+  book(fam: FamId, kind: 'income' | 'wages' | 'managers' | 'other', amount: number, what = '') {
+    const s = this.s;
+    const list = (s.ledger[fam] ??= []);
+    if (!list.length || list[0].day !== s.day) { list.unshift({ day: s.day, income: {}, wages: 0, managers: 0, other: 0 }); list.length = Math.min(list.length, 2); }
+    const L = list[0];
+    if (kind === 'income') L.income[what || 'other'] = (L.income[what || 'other'] ?? 0) + amount;
+    else L[kind] += amount;
+  }
+
+  /** Lieutenants' men stay with them: walk alongside, follow them indoors and into cars, and join their fights. */
+  followLeaders() {
+    const s = this.s;
+    for (const u of s.units) {
+      if (u.leader < 0 || !this.active(u) || u.cop) continue;
+      const L = this.unit(u.leader);
+      if (!L || !this.active(L) || L.fam !== u.fam) { u.leader = -1; continue; }
+      // a direct order from the player runs first; afterwards the man returns to his lieutenant
+      const free = u.order.k === 'idle' || u.order.k === 'follow';
+      if (!free) continue;
+      if (L.loc === 'inside') {
+        if (u.loc !== 'inside') this.order(u, { k: 'goto', b: L.bld, act: 'enter' });
+        continue;
+      }
+      if (L.loc === 'car') {
+        const v = this.vehicle(L.car);
+        if (v && u.loc !== 'car' && v.seats.length < VEHICLES[v.model].seats) this.order(u, { k: 'board', v: v.id });
+        continue;
+      }
+      if (u.loc === 'inside') { this.exitBuilding(u); continue; }
+      if (u.loc === 'car') { const v = this.vehicle(u.car); if (v && !v.seats.includes(L.id)) this.unboard(u); continue; }
+      // join the lieutenant's fight
+      const foe = L.order.k === 'attack' ? L.order.id : L.target;
+      if (foe >= 0 && this.unit(foe)) { this.order(u, { k: 'attack', id: foe }); continue; }
+      if (dist(u, L) > 1.7 && (!u.path.length || s.tick % 15 === 0)) {
+        const k = s.units.filter((x) => x.leader === L.id).indexOf(u);
+        const off = [[-0.55, 0.45], [0.5, 0.5], [-0.5, -0.5], [0.55, -0.45]][k % 4];
+        u.order = { k: 'follow', id: L.id };
+        u.path = this.pf.find(u, { x: L.x + off[0], y: L.y + off[1] });
+      }
+    }
+  }
+
+  /** Patrol, tail and guard orders. */
+  tickPost(u: Unit) {
+    const o = u.order;
+    const s = this.s;
+    if (o.k === 'tail') {
+      const t = this.unit(o.id);
+      if (!t || t.loc === 'jail' || t.loc === 'held' || t.loc === 'dead') { u.order = { k: 'idle' }; this.toast(u.fam, `${u.name} lost the trail.`); return; }
+      const tp = this.pos(t);
+      const d = dist(u, tp);
+      // keep at a careful distance, closer if the target can hardly see
+      const keep = Math.max(2.5, this.detectRange(u) + 0.4);
+      if (t.loc === 'inside' && s.flags['tailseen:' + u.id] !== t.bld) {
+        s.flags['tailseen:' + u.id] = t.bld;
+        const b = s.buildings[t.bld];
+        if (b) this.toast(u.fam, `${u.name}: ${t.name} went into ${b.name}.`, b.door);
+      }
+      if (d > keep + 1.5) { u.repath -= DT; if (u.repath <= 0 || !u.path.length) { u.repath = 0.8; u.path = this.pf.find(u, tp); } }
+      else if (d < keep - 0.5) u.path = [];
+      u.moving = this.step(u, this.speedOf(u));
+      return;
+    }
+    const tp = this.orderTarget(u)!;
+    if (u.target >= 0) { u.moving = false; return; } // fight where you stand
+    if (dist(u, tp) > 0.4) {
+      if (!u.path.length) u.path = this.pf.find(u, tp);
+      u.moving = this.step(u, this.speedOf(u));
+      return;
+    }
+    u.moving = false;
+    if (o.k === 'patrol') {
+      u.repath -= DT;
+      if (u.repath <= -1.5) { u.repath = 0; o.i = (o.i + 1) % o.pts.length; u.path = this.pf.find(u, o.pts[o.i]); }
+    }
+  }
+
+  /** Court cases: verdicts on the trial date, release when the sentence is served. */
+  trials() {
+    const s = this.s;
+    for (const u of s.units) {
+      if (u.loc !== 'jail' || !u.trial) continue;
+      const t = u.trial;
+      const f = s.families[u.fam];
+      if (t.releaseDay) {
+        if (s.day >= t.releaseDay && s.hour >= 9) { this.release(u); if (f?.human) this.toast(u.fam, `${u.name} has served the sentence and is out.`); }
+        continue;
+      }
+      if (s.day < t.day || (s.day === t.day && s.hour < t.hour)) continue;
+      let risk = t.risk - (t.lawyer ? 0.25 : 0) - ((s.flags['witness:' + u.fam] ?? -9) >= s.day - 1 ? 0.2 : 0);
+      if (f && f.payroll.judge > 0) risk = 0;
+      const guilty = this.rng.chance(Math.max(0, risk));
+      s.verdicts.unshift({ day: s.day, name: u.name, fam: u.fam, guilty, sentence: guilty ? t.sentence : 0 });
+      if (s.verdicts.length > 30) s.verdicts.pop();
+      if (!guilty) {
+        this.news(`Jury acquits ${u.name}; "not a shred of evidence," says defence`, false, u.fam);
+        this.release(u);
+        if (f?.human) this.toast(u.fam, `Not guilty! ${u.name} walks free.`);
+      } else {
+        t.releaseDay = s.day + t.sentence;
+        this.news(`${u.name} found guilty, gets ${t.sentence} days`, u.hero, u.fam);
+        if (f?.human) this.toast(u.fam, `Guilty. ${u.name} goes away for ${t.sentence} days (out on day ${t.releaseDay}). Bail is no longer possible, but a fixer or the judge can still help.`, undefined, true);
+        u.bail = 0;
+      }
     }
   }
 
@@ -537,7 +648,9 @@ export class World {
     const o = u.order;
     if (o.k === 'move') return { x: o.x, y: o.y };
     if (o.k === 'goto' || o.k === 'retreat') { const b = this.s.buildings[o.b]; return b ? b.door : null; }
-    if (o.k === 'attack' || o.k === 'kidnap' || o.k === 'follow') { const t = this.unit(o.id); return t ? this.pos(t) : null; }
+    if (o.k === 'attack' || o.k === 'kidnap' || o.k === 'follow' || o.k === 'tail') { const t = this.unit(o.id); return t ? this.pos(t) : null; }
+    if (o.k === 'patrol') return o.pts[o.i % o.pts.length] ?? null;
+    if (o.k === 'guard') return { x: o.x, y: o.y };
     if (o.k === 'board') { const v = this.vehicle(o.v); return v ?? null; }
     return null;
   }
@@ -577,6 +690,7 @@ export class World {
   tickUnit(u: Unit) {
     const o = u.order;
     const s = this.s;
+    if (o.k === 'patrol' || o.k === 'tail' || o.k === 'guard') { this.tickPost(u); return; }
     // chase moving targets
     if (o.k === 'attack' || o.k === 'kidnap' || o.k === 'follow' || o.k === 'board') {
       const tp = this.orderTarget(u);
@@ -732,6 +846,7 @@ export class World {
       case 'buy': {
         const p = this.buyPrice(b, u.fam);
         f.money -= p;
+        this.book(u.fam, 'other', p);
         b.burned = false; b.fire = 0;
         this.repChange(u.fam, b.type === 'amusement' ? 10 : 3);
         this.capture(b, u.fam, [u]);
@@ -742,6 +857,7 @@ export class World {
       case 'bribe': {
         const cost = this.bribeCost(b, u);
         f.money -= cost;
+        this.book(u.fam, 'other', cost);
         if (b.type === 'precinct') {
           f.payroll.precinct = OFFICIALS.precinct.days;
           for (const x of s.units) if (x.fam === u.fam) x.heat = Math.max(0, x.heat - 40);
@@ -751,6 +867,7 @@ export class World {
           this.news('Alderman fast-tracks business permits for "community-minded" buyers', false, u.fam);
         } else {
           f.payroll.judge = OFFICIALS.courthouse.days;
+          s.flags['witness:' + u.fam] = s.day;
           for (const x of s.units) if (x.fam === u.fam && x.loc === 'jail') this.release(x);
           this.news('Judge dismisses a stack of cases for "lack of evidence"', false, u.fam);
         }
@@ -897,6 +1014,7 @@ export class World {
   }
 
   release(u: Unit) {
+    u.trial = null;
     const hq = this.hqOf(u.fam);
     u.loc = 'street';
     u.bail = 0;
@@ -1123,7 +1241,10 @@ export class World {
     }
     // aggressive auto-chase
     for (const u of fighters) {
-      if (u.loc !== 'street' || u.target >= 0 || u.stance !== 'aggressive' || u.order.k !== 'idle' || u.cop) continue;
+      if (u.loc !== 'street' || u.target >= 0 || u.cop) continue;
+      const onGuard = u.order.k === 'guard' || u.order.k === 'patrol';
+      if (!(u.stance === 'aggressive' && u.order.k === 'idle') && !onGuard) continue;
+      if (u.order.k === 'guard' && dist(u, u.order) > 4) continue;
       if ((s.tick + u.id) % 8 !== 0) continue;
       const sight = (this.night() ? NIGHT_SIGHT : SIGHT) * (s.rain ? 0.75 : 1);
       let best: Unit | null = null, bd = sight;
@@ -1218,6 +1339,11 @@ export class World {
     t.hp = 0;
     t.path = [];
     this.ev({ k: 'death', x: t.x, y: t.y, fam: t.fam, name: t.name } as GameEvent);
+    if (!t.guard) {
+      s.obits.unshift({ day: s.day, name: t.name, fam: t.fam, role: t.cop ? 'Police officer' : t.role, where: this.nearestStreet(t), by: by ? (by.cop ? 'the police' : s.families[by.fam]?.name ?? 'unknown') : 'unknown' });
+      if (s.obits.length > 40) s.obits.pop();
+    }
+    for (const x of s.units) if (x.leader === t.id) x.leader = -1;
     if (t.tag) s.flags['killed:' + t.tag] = 1;
     if (by) {
       by.kills++;
@@ -1298,11 +1424,14 @@ export class World {
     u.task = null;
     u.target = -1;
     u.bail = Math.round(100 + u.heat * 4 + u.level * 25);
+    const rep = f ? f.rep : 0;
+    u.trial = { day: s.day + 2, hour: 10, risk: Math.max(0.1, Math.min(0.9, 0.35 + u.heat / 220 + u.kills * 0.03 - rep / 400)), lawyer: false, sentence: u.hero ? 2 : this.rng.int(3, 6), releaseDay: 0 };
     u.heat = 15;
+    for (const x of s.units) if (x.leader === u.id) x.leader = -1;
     if (f && f.payroll.judge > 0) { this.release(u); return; }
     this.ev({ k: 'arrest', x: u.x, y: u.y, fam: u.fam, name: u.name } as GameEvent);
-    this.news(`Police nab ${u.name}; bail set at $${u.bail}`, u.hero, u.fam);
-    if (f?.human) this.toast(u.fam, `${u.name} was arrested! Bail: $${u.bail}`, u, true);
+    this.news(`Police nab ${u.name}; bail set at $${u.bail}, trial on day ${u.trial.day}`, u.hero, u.fam);
+    if (f?.human) this.toast(u.fam, `${u.name} was arrested! Bail $${u.bail}, or wait for the trial on day ${u.trial.day} (${Math.round(u.trial.risk * 100)}% chance of a guilty verdict).`, u, true);
   }
 
   // ---------- upkeep: heat decay, healing ----------
@@ -1489,6 +1618,7 @@ export class World {
       case 'bail': {
         const u = this.unit(cmd.unit);
         if (!u || u.fam !== fam || u.loc !== 'jail') return 'Not in jail.';
+        if (u.trial?.releaseDay) return `${u.name} has been sentenced; bail is no longer possible.`;
         const hasFixer = s.units.some((x) => x.fam === fam && x.spec === 'fixer' && this.active(x));
         const cost = Math.round(u.bail * (hasFixer ? 0.5 : 1));
         if (f.money < cost) return 'Not enough cash for bail.';
@@ -1504,6 +1634,7 @@ export class World {
         const cost = Math.round(m.fee * (s.units.some((x) => x.fam === fam && x.spec === 'fixer' && this.active(x)) ? 0.6 : 1));
         if (f.money < cost) return 'Not enough cash.';
         f.money -= cost;
+        this.book(fam, 'managers', cost);
         b.manager = m;
         b.candidates = b.candidates.filter((c) => c !== m);
         this.toast(fam, `${m.name} now runs ${b.name}.`, b.door);
@@ -1516,6 +1647,7 @@ export class World {
         if (f.money < 90) return 'A guard costs $90 up front.';
         if (this.s.units.filter((u) => u.guard && u.bld === b.id && u.loc === 'inside').length >= 3) return 'Three guards is the most this place can hold.';
         f.money -= 90;
+        this.book(fam, 'other', 90);
         const g = this.addUnit({ ...soldierInit(this.rng, fam, 2, 3, this.rng.chance(0.5) ? 'shotgun' : 'revolver'), role: 'Hired Guard', guard: true, wage: 12, stance: 'defensive' }, b.door);
         g.name = `${this.rng.pick(FIRST)} ${this.rng.pick(LAST)}`;
         g.retreat = false;
@@ -1532,6 +1664,7 @@ export class World {
         const r = RACKETS[cmd.kind];
         if (f.money < r.setup) return `Setting up costs $${r.setup}.`;
         f.money -= r.setup;
+        this.book(fam, 'other', r.setup);
         b.racket = cmd.kind;
         b.stock = cmd.kind === 'speakeasy' ? 1 : 0;
         this.toast(fam, `${r.name} opened behind ${b.name}. Pays at night.`, b.door);
@@ -1545,6 +1678,7 @@ export class World {
         const price = Math.round(def.price * (b.owner === fam ? 0.75 : 1));
         if (f.money < price) return 'Not enough cash.';
         f.money -= price;
+        this.book(fam, 'other', price);
         const v = this.addVehicle(fam, cmd.model, this.pf.nearestWalkable(this.jitter(b.door, 0.8)));
         this.toast(fam, `A ${v.name} is waiting outside ${b.name}.`, v);
         return null;
@@ -1572,6 +1706,68 @@ export class World {
         const home = this.hqOf(u.fam);
         if (home && victim && !victim.eliminated) { u.loc = 'street'; const p = this.pf.nearestWalkable(home.door); u.x = p.x; u.y = p.y; u.order = { k: 'idle' }; }
         else this.removeUnit(u);
+        return null;
+      }
+      case 'lieutenant': {
+        const us = mine(cmd.units).filter((u) => u.id !== cmd.leader);
+        if (cmd.leader < 0) { for (const u of us) { u.leader = -1; if (u.order.k === 'follow') u.order = { k: 'idle' }; } return null; }
+        const L = this.unit(cmd.leader);
+        if (!L || L.fam !== fam) return 'No such lieutenant.';
+        if (L.leader >= 0) return `${L.name} already answers to someone.`;
+        if (L.level < 2 && !L.hero) return `${L.name} needs some experience (level 2) before leading men.`;
+        const have = s.units.filter((x) => x.leader === L.id && this.active(x)).length;
+        const room = Math.max(0, 4 - have);
+        if (!room) return 'A lieutenant leads at most four men.';
+        for (const u of us.slice(0, room)) { u.leader = L.id; for (const x of s.units) if (x.leader === u.id) x.leader = L.id; u.order = { k: 'idle' }; }
+        this.toast(fam, `${us.slice(0, room).map((u) => u.name.split(' ')[0]).join(', ')} now follow${us.length === 1 ? 's' : ''} ${L.name}.`);
+        return null;
+      }
+      case 'patrol': case 'guard': {
+        const us = mine(cmd.units);
+        if (!us.length) return 'Nobody selected.';
+        us.forEach((u, i) => {
+          if (u.loc !== 'street') { if (u.loc === 'car') this.unboard(u); else this.exitBuilding(u); }
+          const off = { x: ((i % 3) - 1) * 0.5, y: (Math.floor(i / 3) - 0.5) * 0.5 };
+          if (cmd.c === 'patrol') this.order(u, { k: 'patrol', pts: cmd.pts.slice(0, 6).map((p) => this.pf.nearestWalkable({ x: p.x + off.x, y: p.y + off.y })), i: 0 });
+          else { const p = this.pf.nearestWalkable({ x: cmd.x + off.x, y: cmd.y + off.y }); this.order(u, { k: 'guard', x: p.x, y: p.y }); }
+          if (u.stance === 'passive') u.stance = 'defensive';
+        });
+        return null;
+      }
+      case 'tail': {
+        const t = this.unit(cmd.target);
+        if (!t || t.fam === fam) return 'Pick a rival to tail.';
+        for (const u of mine(cmd.units)) {
+          if (u.loc !== 'street') { if (u.loc === 'car') this.unboard(u); else this.exitBuilding(u); }
+          u.stance = 'passive';
+          this.order(u, { k: 'tail', id: t.id, seen: -1 });
+        }
+        return null;
+      }
+      case 'lawyer': {
+        const u = this.anyUnit(cmd.unit);
+        if (!u || u.fam !== fam || u.loc !== 'jail' || !u.trial || u.trial.releaseDay) return 'No trial to defend.';
+        if (u.trial.lawyer) return 'A lawyer is already on the case.';
+        const cost = 150 + u.level * 30;
+        if (f.money < cost) return `A good lawyer costs $${cost}.`;
+        f.money -= cost;
+        this.book(fam, 'other', cost);
+        u.trial.lawyer = true;
+        this.toast(fam, `Counsellor Abernathy takes ${u.name}'s case ($${cost}). Guilty chance now about ${Math.round(Math.max(0, u.trial.risk - 0.25) * 100)}%.`);
+        return null;
+      }
+      case 'rumor': {
+        const r = s.families[cmd.fam];
+        if (!r || r.id === fam) return 'Which family?';
+        const cost = 100 + s.day * 10;
+        if (f.money < cost) return `The word on the street costs $${cost}.`;
+        f.money -= cost;
+        this.book(fam, 'other', cost);
+        f.reveal = Math.max(f.reveal, s.time + HOUR * 6);
+        const boss = s.units.find((u) => u.fam === r.id && (u.boss || u.hero) && this.active(u));
+        const where = boss ? (boss.loc === 'inside' ? `inside ${s.buildings[boss.bld]?.name}` : `around ${this.nearestStreet(this.pos(boss))}`) : 'nowhere to be found';
+        const men = s.units.filter((u) => u.fam === r.id && this.active(u)).length;
+        this.toast(fam, `Word is the ${r.short}s have about ${men} men out. ${boss ? `${boss.name} is ${where}.` : ''} Their people show on your map for six hours.`, boss ? this.pos(boss) : undefined);
         return null;
       }
       case 'skill': {

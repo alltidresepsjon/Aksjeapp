@@ -37,6 +37,37 @@ Alle kart med gate langs sørkanten har to steder ute ved strandpromenaden:
   - Gjemmer du en spillehule bak den, tjener du mer, men folk merker det, og omdømmet synker litt hver dag.
 - **Boardwalk Landing**: Noen netter (55 %) legger en smuglerbåt til kl. 21 med 8–16 kasser. Den blir liggende til kl. 03. Kassene koster $12, eller $10 med godt omdømme. Uncle Tommaso sier fra, og du henter dem med bil.
 
+## Løytnanter og ordrer
+
+- **Løytnant:** Velg flere menn og trykk 👑. Den mest erfarne (minst nivå 2, eller helten) blir løytnant for opptil fire menn.
+  - Mennene følger ham på gata, inn i bygg og inn i bilen, og de går inn i kampene hans.
+  - Gir du en av dem en egen ordre, utfører han den først og går så tilbake til løytnanten.
+- **Patrol:** Trykk 2–6 punkter. Gangsteren går runder mellom dem og slåss med det han møter.
+- **Guard:** Gangsteren holder et sted eller en dør og angriper alt innen 4 ruter.
+- **Tail:** Gangsteren skygger en rival med *Passive*, så han ikke blir oppdaget, og melder fra når rivalen går inn i et bygg.
+
+## Rettssaker
+
+En arrestert gangster får rettssak to dager senere kl. 10.
+
+- **Sjanse for fellende dom:** 35 % pluss heat og antall drap, minus omdømme. En advokat ($150 + $30 per nivå) trekker fra 25 %. En bestukket dommer frikjenner alle og skremmer vitnene.
+- **Kausjon** fram til dommen får ham ut med en gang.
+- **Dømt:** Han sitter 3–6 dager (helten 2). Da er kausjon ikke lenger mulig, men en fixer eller dommeren kan fortsatt hjelpe.
+
+## Avisa som knutepunkt
+
+Avisa har disse fanene: overskrifter, rettssaker og dommer, dødsannonser, mest ettersøkte, regnskap (i dag og i går), rykter og stillingsannonser.
+
+Et **rykte** koster $100 + $10 per dag. Du får vite hvor rivalens sjef er og hvor mange menn de har ute, og folkene deres vises på kartet i 6 timer.
+
+## Strategikart
+
+Zoomer du ut under omtrent halv størrelse, glir byen over i et kart:
+
+- tomtene i familiens farge
+- gatenavn og ikoner for bedriftene
+- prikker for folk og biler
+
 ## Omdømme
 
 Familien har et rykte blant vanlige folk, fra −100 til +100. Nivåene er *Public enemy*, *Feared*, *Tolerated*, *Respected* og *Pillar of the community*.

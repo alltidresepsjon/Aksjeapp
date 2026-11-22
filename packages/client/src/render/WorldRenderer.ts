@@ -80,7 +80,8 @@ export class WorldRenderer {
     this.groundG = drawGround(map);
     this.objects.sortableChildren = true;
     this.out = buildOutskirts(map);
-    this.root.addChild(this.out.back, this.groundG, this.ownerG, this.fxGround, this.fogG, this.objects, this.lights, this.fx, this.overlay);
+    this.root.addChild(this.out.back, this.groundG, this.ownerG, this.fxGround, this.fogG, this.objects, this.lights, this.fx, this.strat, this.overlay);
+    this.strat.visible = false;
     for (const o of this.out.objects) {
       o.sprite.zIndex = o.depth;
       this.objects.addChild(o.sprite);
@@ -206,6 +207,69 @@ export class WorldRenderer {
   }
   private parked: { sp: Sprite; fr: CarFrame; color: number }[] = [];
   private parkCenters: { x: number; y: number }[] = [];
+  /** Zoomed-out strategy view: coloured plots, street names, business icons, people as dots. */
+  private strat = new Container();
+  private stratLots = new Graphics();
+  private stratDots = new Graphics();
+  private stratLabels: Text[] = [];
+  private stratBuilt = false;
+  private buildStrategy(view: ViewState) {
+    if (this.stratBuilt || !view.buildings.length) return;
+    this.stratBuilt = true;
+    const map = this.map;
+    this.strat.addChild(this.stratLots, this.stratDots);
+    const label = (text: string, x: number, y: number, rot: number, size: number, color: number) => {
+      const t = new Text({ text, style: { fontFamily: 'Libre Franklin', fontWeight: '800', fontSize: size, fill: color, stroke: { color: 0x000000, width: 3 }, letterSpacing: 1 } });
+      t.anchor.set(0.5);
+      const q = toScreen(x, y);
+      t.position.set(q.x, q.y);
+      t.rotation = rot;
+      this.strat.addChild(t);
+      this.stratLabels.push(t);
+      return t;
+    };
+    const along = Math.atan2(TH / 2, TW / 2);
+    // street names in the middle of each block-long stretch
+    for (let by = 0; by <= map.bh; by++) for (let bx = 0; bx < map.bw; bx += 2) {
+      const y = by * BLOCK_PERIOD + 1, x = bx * BLOCK_PERIOD + ROAD_W + 3;
+      if (map.tiles[Math.floor(y) * map.w + Math.floor(x)] !== 0) continue;
+      label(map.streetsH[by % map.streetsH.length].toUpperCase(), x, y, along, 22, 0xe8e0c8);
+    }
+    for (let bx = 0; bx <= map.bw; bx++) for (let by = 1; by < map.bh; by += 2) {
+      const x = bx * BLOCK_PERIOD + 1, y = by * BLOCK_PERIOD + ROAD_W + 3;
+      if (map.tiles[Math.floor(y) * map.w + Math.floor(x)] !== 0) continue;
+      label(map.streetsV[bx % map.streetsV.length].toUpperCase(), x, y, -along, 22, 0xe8e0c8);
+    }
+    // an icon on every business
+    for (const b of view.buildings) {
+      const def = BTYPES[b.type];
+      if (!def || b.type === 'tenement' || b.type === 'park' || b.type === 'water' || b.type === 'plaza') continue;
+      const t = label(b.type === 'hq' ? '★' : def.icon, b.x + b.size / 2, b.y + b.size / 2, 0, b.size === 6 ? 54 : 34, 0xffffff);
+      t.style.stroke = { color: 0x000000, width: 5 };
+    }    this.drawStrategyLots(view);
+  }
+  private drawStrategyLots(view: ViewState) {
+    const g = this.stratLots;
+    g.clear();
+    const { w, h } = this.map;
+    const q = (x0: number, y0: number, x1: number, y1: number) => [toScreen(x0, y0), toScreen(x1, y0), toScreen(x1, y1), toScreen(x0, y1)].flatMap((p) => [p.x, p.y]);
+    g.poly(q(0, 0, w, h)).fill({ color: 0x1c1e22, alpha: 0.92 });
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const t = this.map.tiles[y * w + x];
+      if (t === 2) g.poly(q(x, y, x + 1, y + 1)).fill({ color: 0x3d5a32, alpha: 0.95 });
+      else if (t === 3) g.poly(q(x, y, x + 1, y + 1)).fill({ color: 0x1d3a4a, alpha: 0.95 });
+    }
+    for (const b of view.buildings) {
+      if (b.type === 'park' || b.type === 'water' || b.type === 'plaza') continue;
+      const f = b.owner ? view.families[b.owner] : null;
+      const civic = b.type === 'precinct' || b.type === 'cityhall' || b.type === 'courthouse' || b.type === 'bank' || b.type === 'church';
+      const color = f ? hex(f.color) : civic ? 0x4d5a6e : b.type === 'tenement' ? 0x4a4640 : 0x6e6858;
+      const m = 0.12;
+      g.poly(q(b.x + m, b.y + m, b.x + b.size - m, b.y + b.size - m)).fill({ color, alpha: f ? 0.9 : 0.85 });
+      g.poly(q(b.x + m, b.y + m, b.x + b.size - m, b.y + b.size - m)).stroke({ width: 3, color: f ? mix(hex(f.color), 0xffffff, 0.35) : 0x2a2a2a, alpha: 0.9 });
+      if (b.burned) g.poly(q(b.x + 0.4, b.y + 0.4, b.x + b.size - 0.4, b.y + b.size - 0.4)).fill({ color: 0x111111, alpha: 0.7 });
+    }
+  }
   private out!: Outskirts;
   private steamT = 0;
   rain = 0;
@@ -216,7 +280,7 @@ export class WorldRenderer {
     const minX = -(h + 6) * (TW / 2), maxX = (w + 6) * (TW / 2), maxY = (w + h + 10) * (TH / 2);
     this.camX = Math.max(minX, Math.min(maxX, x));
     this.camY = Math.max(-260, Math.min(maxY, y));
-    this.zoom = Math.max(0.35, Math.min(2.6, zoom));
+    this.zoom = Math.max(0.2, Math.min(2.6, zoom));
     this.applyCamera();
   }
   applyCamera() {
@@ -228,7 +292,7 @@ export class WorldRenderer {
   panBy(dx: number, dy: number) { this.setCamera(this.camX - dx / this.zoom, this.camY - dy / this.zoom); }
   zoomAt(factor: number, sx: number, sy: number) {
     const before = this.screenToIso(sx, sy);
-    const nz = Math.max(0.35, Math.min(2.6, this.zoom * factor));
+    const nz = Math.max(0.2, Math.min(2.6, this.zoom * factor));
     this.zoom = nz;
     const sw = this.app.screen.width, sh = this.app.screen.height;
     this.setCamera(before.x - (sx - sw / 2) / nz, before.y - (sy - sh / 2) / nz, nz);
@@ -391,6 +455,7 @@ export class WorldRenderer {
     const key = view.buildings.map((b) => (b.owner ?? '-') + (b.burned ? 'x' : '') + (this.selectedBuilding === b.id ? 's' : '') + (this.highlight.includes(b.id) ? 'h' : '')).join('');
     if (key === this.ownerKey) return;
     this.ownerKey = key;
+    if (this.stratBuilt) this.drawStrategyLots(view);
     const g = this.ownerG;
     g.clear();
     for (const b of view.buildings) {
@@ -447,8 +512,32 @@ export class WorldRenderer {
       const tx = Math.floor(x), ty = Math.floor(y);
       return tx >= 0 && ty >= 0 && tx < this.map.w && ty < this.map.h && vis[ty * this.map.w + tx] === 1;
     };
+    this.buildStrategy(view);
     this.drawOwners(view);
     this.drawFog(vis);
+    // below about half zoom the city turns into a map
+    const sa = Math.max(0, Math.min(1, (0.5 - this.zoom) / 0.14));
+    this.strat.visible = sa > 0.01;
+    this.strat.alpha = sa;
+    this.objects.alpha = 1 - sa * 0.85;
+    this.lights.alpha = 1 - sa;
+    if (this.strat.visible) {
+      for (const t of this.stratLabels) t.scale.set(Math.min(2.4, 0.45 / Math.max(0.2, this.zoom)));
+      const d = this.stratDots;
+      d.clear();
+      for (const u of view.units) {
+        if (u.loc !== 'street' && u.loc !== 'car') continue;
+        if (u.fam !== this.sess.fam && !seen(u.x, u.y)) continue;
+        const p = toScreen(u.x, u.y);
+        const c = u.cop ? 0x7aa8ff : hex(view.families[u.fam]?.color ?? '#ffffff');
+        d.circle(p.x, p.y, u.hero || u.boss ? 11 : 7).fill({ color: c }).stroke({ width: 2.5, color: u.hero || u.boss ? 0xffd36b : 0x000000 });
+      }
+      for (const v of view.vehicles) {
+        if (v.dead || (v.fam !== this.sess.fam && !seen(v.x, v.y))) continue;
+        const p = toScreen(v.x, v.y);
+        d.rect(p.x - 10, p.y - 6, 20, 12).fill({ color: hex(view.families[v.fam]?.color ?? '#cccccc') }).stroke({ width: 2, color: 0x000000 });
+      }
+    }
 
     // our own people and cars hidden behind a building make it see-through
     const behind: { x: number; y: number; d: number }[] = [];

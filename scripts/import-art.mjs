@@ -31,6 +31,7 @@ function target(name) {
   if ((m = /^building-(?:type-)?[a-z]+-(3|6)-/.exec(name))) return { cat: 'buildings', width: Math.round((+m[1] - INSET * 2) * 64 * 2) };
   if (name.startsWith('person-')) return { cat: 'people', height: 112 };
   if (name.startsWith('car-')) return { cat: 'cars', width: 260 };
+  if (name.startsWith('portrait-')) return { cat: 'ui', width: 256, keepBg: true };
   if (name.startsWith('icon-')) return { cat: 'icons', width: 128 };
   if (/^ui-(title|safehouse|win|lose|lobby)$/.test(name)) return { cat: 'ui', width: 1600, keepBg: true };
   if (name.startsWith('ui-briefing-')) return { cat: 'ui', width: 1200, keepBg: true };

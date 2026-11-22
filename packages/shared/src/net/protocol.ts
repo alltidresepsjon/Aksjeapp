@@ -33,7 +33,7 @@ export type ServerMsg =
 /** The subset of WorldState a client needs to draw and play. */
 export type ViewState = Pick<WorldState,
   'mode' | 'chapter' | 'tick' | 'time' | 'day' | 'hour' | 'units' | 'buildings' | 'vehicles' | 'families' | 'order' |
-  'news' | 'ads' | 'events' | 'objectives' | 'result' | 'fog' | 'timeLimitDay' | 'rain'>;
+  'news' | 'ads' | 'events' | 'objectives' | 'result' | 'fog' | 'timeLimitDay' | 'rain' | 'obits' | 'verdicts' | 'ledger'>;
 
 export interface Snapshot extends ViewState {
   vis: string;
@@ -110,7 +110,7 @@ export function makeSnapshot(w: World, fam: FamId, sinceEv: number, extra: { spe
   return {
     mode: s.mode, chapter: s.chapter, tick: s.tick, time: s.time, day: s.day, hour: s.hour,
     units, buildings, vehicles, families, order: s.order, news: s.news.slice(0, 30), ads: s.ads,
-    events, objectives: s.objectives, result: s.result, fog: s.fog, timeLimitDay: s.timeLimitDay, rain: s.rain,
+    events, objectives: s.objectives, result: s.result, fog: s.fog, timeLimitDay: s.timeLimitDay, rain: s.rain, obits: s.obits.slice(0, 20), verdicts: s.verdicts.slice(0, 15), ledger: { [fam]: s.ledger[fam] ?? [] },
     vis: packBits(vis), ...extra,
   };
 }

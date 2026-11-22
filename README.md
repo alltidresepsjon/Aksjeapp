@@ -31,6 +31,7 @@ Vil du teste på mobilen i samme nettverk? Vite skriver ut en nettverksadresse (
 
 ## Hva er med
 
+- **Løytnanter og nye ordrer** (Patrol, Guard, Tail), **rettssaker**, avisa med faner (dommer, dødsannonser, mest ettersøkte, regnskap, rykter), **strategikart** når du zoomer ut, gangsterkort med portretter, ferdigheter som stjerner, egne navn på helt og familie, og **Hall of Fame**.
 - **Sjøsiden**: fornøyelsespir med pariserhjul (ta den eller kjøp og drive den rent), smuglerbåter ved landingsbrygga om natta, og **omdømme** blant folk som gir tips eller tystere.
 - **Regn**: færre vitner og mindre heat, men kortere sikt og dårligere treff.
 - **Vanskelighetsgrad og lagring**: lett, normal eller vanskelig. Kapitler lagres automatisk hver morgen og med «Save game» i menyen.

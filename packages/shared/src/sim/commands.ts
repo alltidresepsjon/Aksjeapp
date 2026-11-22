@@ -25,4 +25,13 @@ export type Command =
   | { c: 'closeRacket'; b: number }
   | { c: 'buyCar'; b: number; model: VModel }
   | { c: 'hostage'; unit: number; what: 'interrogate' | 'ransom' | 'release' }
-  | { c: 'skill'; unit: number; stat: StatKey };
+  | { c: 'skill'; unit: number; stat: StatKey }
+  /** Put men under a lieutenant (leader -1 = they work on their own again). */
+  | { c: 'lieutenant'; units: number[]; leader: number }
+  | { c: 'patrol'; units: number[]; pts: { x: number; y: number }[] }
+  | { c: 'tail'; units: number[]; target: number }
+  | { c: 'guard'; units: number[]; x: number; y: number }
+  /** Hire a lawyer for a jailed man's trial. */
+  | { c: 'lawyer'; unit: number }
+  /** Pay the street for news of a rival family. */
+  | { c: 'rumor'; fam: string };

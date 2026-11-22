@@ -34,6 +34,20 @@ export interface CampaignSave {
   seed: number;
   lastReport: ChapterReport | null;
   difficulty?: Difficulty;
+  /** The player's own names (default Nico / Corrado). */
+  heroFirst?: string;
+  familyName?: string;
+  stats?: { days: number; kills: number; lost: number; earned: number };
+}
+
+/** Swap the default hero and family names for the player's own, in any text. */
+export function personalize(text: string, save: Pick<CampaignSave, 'heroFirst' | 'familyName'>): string {
+  const first = (save.heroFirst || 'Nico').trim(), fam = (save.familyName || 'Corrado').trim();
+  if (first === 'Nico' && fam === 'Corrado') return text;
+  return text.replace(/\bNico\b/g, first).replace(/\bCorrado(s?)\b/g, (_m, pl) => fam + pl).replace(/\bCORRADO(S?)\b/g, (_m, pl) => fam.toUpperCase() + pl);
+}
+export function personalizeChapter(def: ChapterDef, save: CampaignSave): ChapterDef {
+  return JSON.parse(personalize(JSON.stringify(def), save));
 }
 
 export interface ChapterReport {
@@ -50,17 +64,19 @@ export interface ChapterReport {
 let idCounter = 0;
 const rid = () => 'r' + Date.now().toString(36) + (idCounter++).toString(36);
 
-export function newCampaign(seed = Date.now(), difficulty: Difficulty = 'normal'): CampaignSave {
+export function newCampaign(seed = Date.now(), difficulty: Difficulty = 'normal', heroFirst = 'Nico', familyName = 'Corrado'): CampaignSave {
   const rng = new Rng(seed);
-  return {
+  const save: CampaignSave = {
+    heroFirst, familyName, stats: { days: 0, kills: 0, lost: 0, earned: 0 },
     version: 1, chapter: 0, cash: 600 + DIFFICULTY[difficulty].cash, cars: [], completed: [], seed, lastReport: null, difficulty,
     ads: [0, 1, 2, 3, 4].map(() => genAd(rng, 1)),
     roster: [
-      { id: 'nico', name: 'Nico Corrado', role: 'The Son', spec: 'none', stats: { muscle: 3, aim: 3, charm: 4, stealth: 3 }, level: 1, xp: 0, sp: 1, weapon: 'revolver', wage: 0, hero: true, kills: 0, chapters: 0 },
+      { id: 'nico', name: `${heroFirst} ${familyName}`, role: 'The Son', spec: 'none', stats: { muscle: 3, aim: 3, charm: 4, stealth: 3 }, level: 1, xp: 0, sp: 1, weapon: 'revolver', wage: 0, hero: true, kills: 0, chapters: 0 },
       { id: 'lou', name: 'Lou Brennan', role: 'Bruiser', spec: 'none', stats: { muscle: 5, aim: 3, charm: 1, stealth: 2 }, level: 1, xp: 0, sp: 0, weapon: 'shotgun', wage: 14, hero: false, kills: 0, chapters: 0 },
       { id: 'rosie', name: 'Rosie Ricci', role: 'Talker', spec: 'none', stats: { muscle: 1, aim: 2, charm: 5, stealth: 3 }, level: 1, xp: 0, sp: 0, weapon: 'revolver', wage: 10, hero: false, kills: 0, chapters: 0 },
     ],
   };
+  return save;
 }
 
 export function refreshSafehouseAds(save: CampaignSave) {
@@ -82,12 +98,14 @@ export function chapterFor(save: CampaignSave): ChapterDef | undefined {
   return CHAPTERS[save.chapter];
 }
 
-export function buildChapterWorld(def: ChapterDef, save: CampaignSave, crewIds: string[], seed = Date.now()): World {
+export function buildChapterWorld(raw: ChapterDef, save: CampaignSave, crewIds: string[], seed = Date.now()): World {
+  const def = personalizeChapter(raw, save);
   const crew: UnitInit[] = save.roster.filter((r) => crewIds.includes(r.id) || r.hero).map((r) => ({
     fam: 'P', name: r.name, role: r.role, spec: r.spec, stats: { ...r.stats }, level: r.level, xp: r.xp, sp: r.sp,
     weapon: r.weapon, wage: r.wage, hero: r.hero, rosterId: r.id, stance: 'defensive',
   }));
-  const families = def.families.map((f) => (f.id === 'P' ? { ...f, money: Math.max(save.cash, def.minCash) } : f));
+  const fname = (save.familyName || 'Corrado').trim();
+  const families = def.families.map((f) => (f.id === 'P' ? { ...f, name: `${fname} Family`, short: fname, money: Math.max(save.cash, def.minCash) } : f));
   const cars = [...save.cars.slice(0, 3), ...def.gift].map((model) => ({ fam: 'P', model }));
   const w = new World({
     mode: 'campaign', chapter: def.id, layout: def.layout, families, crew: { P: crew }, vehicles: cars,
@@ -133,6 +151,11 @@ export function finishChapter(save: CampaignSave, w: World, def: ChapterDef): Ch
   report.earned = save.cash - start;
   save.cars = s.vehicles.filter((v) => !v.dead && v.fam === 'P').map((v) => v.model).slice(0, 4);
   save.completed.push(def.id);
+  const st = (save.stats ??= { days: 0, kills: 0, lost: 0, earned: 0 });
+  st.days += s.day;
+  st.kills += s.units.filter((u) => u.fam === 'P').reduce((a, u) => a + u.kills, 0);
+  st.lost += report.dead.length;
+  st.earned += Math.max(0, report.earned);
   save.chapter++;
   refreshSafehouseAds(save);
   save.lastReport = report;

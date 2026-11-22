@@ -45,7 +45,7 @@ export function makeUnit(id: number, init: UnitInit, x: number, y: number): Unit
     order: { k: 'idle' }, task: null, loc: 'street', bld: -1, car: -1,
     heat: 0, wage: init.wage ?? 0, hero: !!init.hero, boss: !!init.boss, cop: !!init.cop, guard: !!init.guard,
     tag: init.tag ?? '', target: -1, lastHurt: -99, lastShot: -99, lastAttacker: -1, bail: 0,
-    rosterId: init.rosterId ?? '', kills: 0, xpGain: 0, repath: 0, behavior: null, heldBy: '', intel: 0, grab: 0,
+    rosterId: init.rosterId ?? '', kills: 0, xpGain: 0, repath: 0, behavior: null, heldBy: '', intel: 0, grab: 0, leader: -1, trial: null,
   };
 }
 
