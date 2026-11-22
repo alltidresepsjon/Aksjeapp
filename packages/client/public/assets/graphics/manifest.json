@@ -12,8 +12,8 @@
     "hq-3-1": {
       "file": "buildings/building-hq-3-1.png",
       "w": 348,
-      "h": 382,
-      "ax": 0.4987,
+      "h": 335,
+      "ax": 0.5,
       "fw": 348,
       "lit": "buildings/building-hq-3-1-lit.png"
     },
@@ -51,17 +51,17 @@
     },
     "type-bakery-3-1": {
       "file": "buildings/building-type-bakery-3-1.png",
-      "w": 348,
-      "h": 352,
-      "ax": 0.4996,
+      "w": 352,
+      "h": 461,
+      "ax": 0.5,
       "fw": 348,
       "lit": "buildings/building-type-bakery-3-1-lit.png"
     },
     "type-barber-3-1": {
       "file": "buildings/building-type-barber-3-1.png",
-      "w": 348,
-      "h": 355,
-      "ax": 0.4996,
+      "w": 366,
+      "h": 510,
+      "ax": 0.498,
       "fw": 348,
       "lit": "buildings/building-type-barber-3-1-lit.png"
     },
@@ -88,6 +88,14 @@
       "ax": 0.4967,
       "fw": 348,
       "lit": "buildings/building-type-laundry-3-1-lit.png"
+    },
+    "type-pawn-3-1": {
+      "file": "buildings/building-type-pawn-3-1.png",
+      "w": 353,
+      "h": 463,
+      "ax": 0.5,
+      "fw": 348,
+      "lit": "buildings/building-type-pawn-3-1-lit.png"
     },
     "type-tailor-3-1": {
       "file": "buildings/building-type-tailor-3-1.png",
