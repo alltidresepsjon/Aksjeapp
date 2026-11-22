@@ -447,7 +447,8 @@ export class WorldRenderer {
     this.objects.addChild(spr, fl);
     const art: BuildingArt = { day: null as unknown as HTMLCanvasElement, lit: null as unknown as HTMLCanvasElement, ox: 0, oy: 0, w: s * 64, h, flag: { x: 0, y: 0 }, height: Math.max(20, h - s * 32) };
     const left = B.x - tex.width * scale * pic.ax, right = left + tex.width * scale;
-    const poly = [left, B.y - h, right, B.y - h, right, B.y - s * 16, B.x, B.y, left, B.y - s * 16];
+    const sideY = B.y - (B.x - left) / 2; // where the picture's left/right edges meet the ground diamond
+    const poly = [left, B.y - h, right, B.y - h, right, B.y - (right - B.x) / 2, B.x, B.y + 2, left, sideY];
     this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex: tex, depth, fade: 1, custom: true, poly });
   }
 
@@ -557,8 +558,9 @@ export class WorldRenderer {
     for (const bs of this.buildings.values()) {
       const b = view.buildings[bs.b.id] ?? bs.b;
       bs.b = b;
-      const hides = behind.some((q) => q.d < bs.depth - 0.2 && inPoly(q.x, q.y, bs.poly));
-      const target = hides ? 0.3 : 1;
+      // any part of the figure (feet, body, head) behind the picture counts
+      const hides = behind.some((q) => q.d < bs.depth - 0.2 && [[0, 14], [0, -6], [-8, -6], [8, -6], [0, -26]].some(([dx, dy]) => inPoly(q.x + dx, q.y + dy, bs.poly)));
+      const target = hides ? 0.22 : 1;
       bs.fade += (target - bs.fade) * Math.min(1, dt * 8);
       bs.spr.alpha = bs.fade;
       bs.flag.alpha = bs.fade;
