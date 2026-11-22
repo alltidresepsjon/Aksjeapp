@@ -170,7 +170,7 @@ export const CHAPTERS: ChapterDef[] = [
       { id: 'o1', text: 'Open a Distillery racket behind a front', def: { k: 'racket', kind: 'still', n: 1 } },
       { id: 'o2', text: 'Open a Speakeasy racket', def: { k: 'racket', kind: 'speakeasy', n: 1 } },
       { id: 'o3', text: 'Deliver 10 crates of liquor to your speakeasies', def: { k: 'deliver', n: 10 } },
-      { id: 'o4', text: 'Build a war chest of $3,000', def: { k: 'cash', n: 3000 } },
+      { id: 'o4', text: 'Build a war chest: earn $2,500 more than you started with', def: { k: 'cash', n: 2500 } },
     ],
     script: [
       { at: { day: 2, hour: 23 }, do: [{ k: 'wave', fam: 'K', n: 4, tag: 'hq', edge: 'E' }, { k: 'news', text: 'Kessler trucks seen circling Canal Docks', big: true }] },

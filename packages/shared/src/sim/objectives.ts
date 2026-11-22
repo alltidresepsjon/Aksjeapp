@@ -38,7 +38,11 @@ function evaluate(w: World, o: Objective): boolean {
       return n >= d.n;
     }
     case 'deliver': o.progress = `${Math.min(fam.delivered, d.n)}/${d.n}`; return fam.delivered >= d.n;
-    case 'cash': o.progress = `$${Math.round(Math.max(0, fam.money)).toLocaleString('en-US')} / $${d.n.toLocaleString('en-US')}`; return fam.money >= d.n;
+    case 'cash': {
+      const earned = Math.max(0, fam.money - (s.flags.startMoney ?? 0));
+      o.progress = `$${Math.round(earned).toLocaleString('en-US')} / $${d.n.toLocaleString('en-US')}`;
+      return earned >= d.n;
+    }
     case 'destroy': {
       const bs = w.byTag(d.tag);
       o.progress = `${bs.filter((b) => b.burned).length}/${bs.length}`;

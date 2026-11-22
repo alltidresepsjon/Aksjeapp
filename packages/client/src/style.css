@@ -62,7 +62,7 @@ a { color: var(--gold); }
 .spec { font-size: 10px; background: #3a2f18; color: var(--gold); border-radius: 4px; padding: 1px 5px; margin-left: 6px; text-transform: uppercase; letter-spacing: .5px; }
 .lvl { font-size: 12px; color: var(--mute); margin: 6px 0; display: flex; align-items: center; gap: 8px; }
 .lvl .bars { flex: 1; }
-.rstats { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0; }
+.rstats { display: grid; grid-template-columns: repeat(4, auto); justify-content: start; gap: 6px 14px; margin: 6px 0; }
 .rstats .st { font-size: 13px; }
 .rfoot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
 .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; }
@@ -199,7 +199,7 @@ h4.sub { margin: 14px 0 6px; color: var(--gold); font-family: Limelight, serif; 
   #ticker { font-size: 12.5px; padding: 4px 10px; }
   #selbar { left: 6px; right: 6px; bottom: 6px; max-width: none; padding: 8px; }
   #card { right: 6px; left: 6px; width: auto; bottom: 6px; max-height: 55%; }
-  #selbar.show ~ #card.show { bottom: 6px; }
+  .has-card #selbar { display: none !important; }
   #mmhost { top: 8px; right: 6px; }
   .minimap { width: 128px !important; height: 72px !important; }
   #maptools { top: 8px; left: 6px; }

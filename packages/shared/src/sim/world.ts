@@ -99,6 +99,8 @@ export class World {
       flags: {}, nextId: 1, copTimer: 0, result: null, fog: init.fog, timeLimitDay: init.timeLimitDay ?? 0, interrupt: 0,
     };
     for (const b of buildings) this.refreshCandidates(b);
+    const human = init.families.find((f) => f.human);
+    if (human) this.s.flags.startMoney = human.money;
 
     // player crews
     for (const fid of Object.keys(init.crew)) {

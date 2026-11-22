@@ -624,6 +624,7 @@ export class Game {
   private card(v: ViewState) {
     const card = $('#card', this.root);
     const b = v.buildings[this.selBuilding];
+    this.root.classList.toggle('has-card', !!b);
     if (!b) { setHtml(card, ''); card.classList.remove('show'); return; }
     const fam = v.families[this.sess.fam];
     const def = BTYPES[b.type];
