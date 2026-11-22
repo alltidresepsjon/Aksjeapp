@@ -8,6 +8,7 @@ import {
 import { WorldRenderer, type Hit } from '../render/WorldRenderer';
 import { Minimap } from '../render/Minimap';
 import { Input } from '../input/Input';
+import { loadArtPack } from '../render/artPack';
 import { audio } from '../audio/Audio';
 import type { Session } from '../session/Session';
 import { $, $$, clock, el, esc, money, setHtml, statIcons } from '../ui/dom';
@@ -72,6 +73,7 @@ export class Game {
           <div id="advisor">
             <button id="adv-face" title="Messages and rumours">${ADVISOR_SVG}<span class="badge" id="adv-badge"></span></button>
             <div id="adv-bubble"></div>
+            <div id="adv-tut"></div>
             <div id="adv-log"></div>
           </div>
           <div id="maptools">
@@ -84,6 +86,8 @@ export class Game {
           <div id="selbar"></div>
           <div id="card"></div>
           <div id="boxsel"></div>
+          <div id="arrows"></div>
+          <div id="zoombtns"><button data-z="in" title="Zoom in (+)">+</button><button data-z="out" title="Zoom out (−)">−</button></div>
         </div>
         <aside id="side">
           <nav id="tabs">
@@ -106,7 +110,11 @@ export class Game {
     await this.app.init({ resizeTo: view, background: 0x0b0d12, antialias: true, resolution: Math.min(2, devicePixelRatio || 1), autoDensity: true });
     if (this.destroyed) return;
     view.prepend(this.app.canvas);
-    this.renderer = new WorldRenderer(this.app, this.sess.map, this.sess);
+    const pack = await loadArtPack();
+    if (this.destroyed) return;
+    this.renderer = new WorldRenderer(this.app, this.sess.map, this.sess, pack);
+    const face = pack.ui('tommaso');
+    if (face) $('#adv-face', this.root).insertAdjacentHTML('afterbegin', `<img src="${face}" alt="">`), $('#adv-face svg', this.root)?.remove();
     this.app.stage.addChild(this.renderer.root);
     this.minimap = new Minimap(this.sess.map, this.sess, this.renderer, $('#mmhost', this.root));
     this.renderer.onEvent = (e, vis) => this.onEvent(e, vis);
@@ -125,7 +133,7 @@ export class Game {
     });
     this.bindUi();
     // start the camera on our headquarters
-    this.renderer.zoom = innerWidth < 820 ? 0.8 : 1.1;
+    this.renderer.zoom = innerWidth < 820 ? 1.05 : 1.4;
     this.renderer.centerOnTile(this.sess.map.w / 2, this.sess.map.h / 2);
     this.placeCamera();
     this.app.ticker.add((t) => this.frame(t.deltaMS / 1000));
@@ -148,7 +156,8 @@ export class Game {
     const pull = innerWidth <= 820 ? 0 : 0.12;
     this.renderer.centerOnTile(hq.door.x + (cx - hq.door.x) * pull, hq.door.y + (cy - hq.door.y) * pull - 0.5);
     const hero = v.units.find((u) => u.fam === this.sess.fam && u.hero);
-    if (hero) this.sel.add(hero.id);
+    const tutorialAhead = v.chapter === 'c1' && !localStorage.getItem('bg-tutorial-done');
+    if (hero && !tutorialAhead) this.sel.add(hero.id);
   }
 
   private frame(dt: number) {
@@ -239,6 +248,7 @@ export class Game {
   private cmd(c: Command) {
     const err = this.sess.command(c);
     if (err) this.toast(err, false, undefined, false);
+    else if (c.c === 'drive' || c.c === 'route') audio.engine(0.55);
     else audio.click();
     this.refresh(true);
     return err;
@@ -414,12 +424,24 @@ export class Game {
       this.refresh(true);
     };
     $('#adv-face', r).onclick = () => { audio.unlock(); this.toggleLog(); };
+    $('#adv-tut', r).onclick = (e) => {
+      if ((e.target as HTMLElement).closest('[data-tut="skip"]')) { localStorage.setItem('bg-tutorial-done', '1'); $('#adv-tut', r).className = ''; this.glow(null); }
+    };
     $('#adv-log', r).onclick = (e) => {
       const t = e.target as HTMLElement;
       if (t.closest('[data-adv="close"]')) { this.toggleLog(false); return; }
       const i = t.closest<HTMLElement>('[data-adv-i]')?.dataset.advI;
       const m = i !== undefined ? this.messages[+i] : undefined;
       if (m?.at) { this.renderer.centerOnTile(m.at.x, m.at.y); if (innerWidth <= 820) this.toggleLog(false); }
+    };
+    $('#zoombtns', r).onclick = (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-z]');
+      if (!b) return;
+      this.renderer.zoomAt(b.dataset.z === 'in' ? 1.25 : 0.8, this.app.screen.width / 2, this.app.screen.height / 2);
+    };
+    $('#arrows', r).onclick = (e) => {
+      const a = (e.target as HTMLElement).closest<HTMLElement>('[data-x]');
+      if (a) this.renderer.centerOnTile(+a.dataset.x!, +a.dataset.y!);
     };
     const delegate = (e: Event) => this.onUiAction(e);
     $('#side', r).addEventListener('click', delegate);
@@ -508,11 +530,98 @@ export class Game {
     else if (this.tab === 'paper') this.paperPane(v);
     else this.goalsPane(v);
     this.selBar(v);
+    this.arrows(v);
+    this.tutorial(v);
     this.card(v);
     const affordable = v.ads.filter((a) => a.fee <= fam.money).length;
     const badge = $('#adBadge', this.root);
     badge.textContent = affordable ? String(affordable) : '';
     badge.style.display = affordable ? 'inline-block' : 'none';
+  }
+
+  // ---------- arrows at the screen edge pointing at trouble outside the view ----------
+  private arrows(v: ViewState) {
+    const box = $('#arrows', this.root);
+    const sw = this.app.screen.width, sh = this.app.screen.height;
+    const vis = this.sess.vis();
+    const seen = (x: number, y: number) => !vis || vis[Math.floor(y) * this.sess.map.w + Math.floor(x)] === 1;
+    const sectors = new Map<number, { n: number; x: number; y: number; d: number; color: string; urgent: boolean; label: string }>();
+    const add = (x: number, y: number, color: string, urgent: boolean, label: string) => {
+      const p = this.renderer.tileToScreen(x, y);
+      const m = 30;
+      if (p.x > m && p.x < sw - m && p.y > m && p.y < sh - m) return;
+      const ang = Math.atan2(p.y - sh / 2, p.x - sw / 2);
+      const key = Math.round((ang / (Math.PI * 2)) * 12) % 12 + (urgent ? 100 : 0);
+      const d = Math.hypot(p.x - sw / 2, p.y - sh / 2);
+      const cur = sectors.get(key);
+      if (cur) { cur.n++; if (d < cur.d) { cur.x = x; cur.y = y; cur.d = d; } }
+      else sectors.set(key, { n: 1, x, y, d, color, urgent, label });
+    };
+    for (const u of v.units) {
+      if (u.fam === this.sess.fam || u.loc !== 'street' || u.cop) continue;
+      if (!seen(u.x, u.y)) continue;
+      const f = v.families[u.fam];
+      add(u.x, u.y, f?.color ?? '#e0505f', false, f ? f.short : '');
+    }
+    for (const b of v.buildings) {
+      if (b.owner !== this.sess.fam) continue;
+      if (Object.entries(b.prog).some(([fid, val]) => fid !== this.sess.fam && val > 3)) add(b.door.x, b.door.y, '#ff3a2a', true, b.name);
+    }
+    const html: string[] = [];
+    for (const a of [...sectors.values()].slice(0, 10)) {
+      const p = this.renderer.tileToScreen(a.x, a.y);
+      const ang = Math.atan2(p.y - sh / 2, p.x - sw / 2);
+      // where the ray from the centre leaves the view (with a margin)
+      const mx = sw / 2 - 34, my = sh / 2 - 34;
+      const t = Math.min(mx / Math.abs(Math.cos(ang) || 1e-6), my / Math.abs(Math.sin(ang) || 1e-6));
+      const x = sw / 2 + Math.cos(ang) * t, y = sh / 2 + Math.sin(ang) * t;
+      const title = a.urgent ? `${a.label} is under attack` : `${a.n} × ${a.label}`;
+      html.push(`<button class="offarrow ${a.urgent ? 'urgent' : ''}" style="left:${x}px;top:${y}px;--c:${a.color}" data-x="${a.x.toFixed(2)}" data-y="${a.y.toFixed(2)}" title="${esc(title)}"><i style="transform:rotate(${ang}rad)"></i><b>${a.urgent ? '!' : a.n}</b></button>`);
+    }
+    setHtml(box, html.join(''));
+  }
+
+  // ---------- tutorial: Uncle Tommaso walks you through chapter 1 ----------
+  private tutStep = -1;
+  private tutT = 0;
+  private tutorial(v: ViewState) {
+    if (v.chapter !== 'c1' || this.sess.isNet) return;
+    if (localStorage.getItem('bg-tutorial-done')) return;
+    const P = this.sess.fam;
+    const mine = v.units.filter((u) => u.fam === P);
+    const hq = v.buildings.find((b) => b.hqOf === P);
+    const owned = v.buildings.filter((b) => b.owner === P && b.type !== 'hq').length;
+    const steps: { text: string; glow?: string; done: () => boolean }[] = [
+      { text: 'Nico, listen to your uncle. First, tap yourself: the man in the pale hat outside the bakery. Or tap your name in the Crew list.', done: () => mine.some((u) => u.hero && this.sel.has(u.id)) },
+      { text: 'Good. Now tap one of the little shops next door, the ones with striped awnings, and press Extort. A polite visit; they will pay.', done: () => mine.some((u) => (u.order.k === 'goto' && u.order.act === 'extort') || u.task?.k === 'extort') || owned > 0 },
+      { text: 'Charm makes them pay faster. Bring the whole family: press 👥 All, then send them to other shops.', glow: '[data-tool="all"]', done: () => this.sel.size >= 2 },
+      { text: 'Waiting costs nothing but time. Press 2× or 3× up top to hurry the day along.', glow: '#speed', done: () => this.sess.speed >= 2 || this.sess.skipping },
+      { text: 'Every shop pays by the hour while it is open. Take four of them. Need more hands? The Herald tab has men looking for work.', glow: '#tabs [data-tab="paper"]', done: () => owned >= 4 || v.hour >= 18.5 },
+      { text: 'Night is coming, and the Doyles with it. Select everyone, tap the Corrado Bakery and press "Go inside / guard".', glow: '#maptools', done: () => !!hq && mine.filter((u) => u.loc === 'inside' && u.bld === hq.id).length >= 2 },
+      { text: 'Inside, they shoot from the windows and heal up. Keep Nico alive. Arrows at the edge show where trouble is, and you can tap me any time to read what I have heard. Good luck.', done: () => this.tutT > 12 },
+    ];
+    if (this.tutStep < 0) this.tutStep = 0;
+    const st = steps[this.tutStep];
+    if (!st) return;
+    if (this.tutStep === steps.length - 1) this.tutT += 0.2;
+    if (st.done()) {
+      this.tutStep++;
+      this.tutT = 0;
+      if (this.tutStep >= steps.length) { localStorage.setItem('bg-tutorial-done', '1'); $('#adv-tut', this.root).className = ''; this.glow(null); return; }
+      audio.click();
+    }
+    const cur = steps[this.tutStep];
+    const el2 = $('#adv-tut', this.root);
+    el2.className = 'show';
+    setHtml(el2, `<small>Lesson ${this.tutStep + 1} of ${steps.length}</small>${esc(cur.text)}<button class="skip" data-tut="skip">Skip the lessons</button>`);
+    this.glow(cur.glow ?? null);
+  }
+  private glowSel: string | null = null;
+  private glow(sel: string | null) {
+    if (sel === this.glowSel) return;
+    if (this.glowSel) $$(this.glowSel, this.root).forEach((e) => e.classList.remove('tut-glow'));
+    this.glowSel = sel;
+    if (sel) $$(sel, this.root).forEach((e) => e.classList.add('tut-glow'));
   }
 
   private hud(v: ViewState) {

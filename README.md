@@ -25,6 +25,7 @@ Vil du teste på mobilen i samme nettverk? Vite skriver ut en nettverksadresse (
 | `npm run typecheck` | TypeScript-sjekk av alle pakkene |
 | `npm run build` | Bygger klienten til `packages/client/dist` |
 | `npm start` | Produksjonsserver: serverer det bygde spillet og WebSocket på samme port (`PORT`, standard 8787) |
+| `npm run art` | Importerer egne bilder fra `art-inbox/` |
 | `npm run shots` | Tar skjermbilder med Playwright (krever at `npm start` kjører) |
 
 ## Hva er med
@@ -58,8 +59,12 @@ Mer om oppbyggingen finner du i [docs/arkitektur.md](docs/arkitektur.md). Spilld
 
 ## Om grafikk og lyd
 
-All grafikk tegnes i kode når spillet starter, og all lyd lages med Web Audio. Spillet bruker ingen bilde- eller lydfiler fra andre spill.
-Vil du bytte inn egne filer, ligger konvensjonene i `packages/client/public/assets/*/README.md`. Skriftene (Limelight, Libre Franklin og Old Standard TT) har OFL-lisens og leveres via `@fontsource`.
+Grafikken tegnes i kode, men kan byttes ut bit for bit med egne bilder, for eksempel laget i ChatGPT.
+Ferdige prompter og filnavn står i [docs/grafikk-prompter.md](docs/grafikk-prompter.md). Legg bildene i `art-inbox/` og kjør
+`npm run art`. Skriptet fjerner bakgrunn, beskjærer og skalerer. `npm run art:clear` fjerner dem igjen.
+
+Lyd og musikk er opptak med åpne lisenser fra OpenGameArt (se `packages/client/public/assets/audio/CREDITS.md`).
+Resten lages med Web Audio. Skriftene (Limelight, Libre Franklin og Old Standard TT) har OFL-lisens og leveres via `@fontsource`.
 
 ## Publisering
 

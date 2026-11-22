@@ -76,6 +76,13 @@ export class Minimap {
       c.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
       if (u.hero || u.boss) { c.strokeStyle = '#ffd36b'; c.strokeRect(p.x - 2.5, p.y - 2.5, 5, 5); }
     }
+    for (const v of view.vehicles) {
+      if (v.dead) continue;
+      const p = this.P(v.x, v.y);
+      c.fillStyle = view.families[v.fam]?.color ?? '#ddd';
+      c.fillRect(p.x - 3, p.y - 2, 6, 4);
+      c.strokeStyle = '#000'; c.lineWidth = 1; c.strokeRect(p.x - 3, p.y - 2, 6, 4);
+    }
     const corners = this.r.viewCorners().map((p) => this.P(p.x, p.y));
     c.strokeStyle = 'rgba(255,255,255,0.85)';
     c.lineWidth = 1.5;

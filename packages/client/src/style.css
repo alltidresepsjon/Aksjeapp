@@ -122,7 +122,8 @@ a { color: var(--gold); }
 #advisor { position: absolute; left: 10px; top: 52px; z-index: 6; display: flex; align-items: flex-start; gap: 8px; pointer-events: none; max-width: calc(100% - 200px); }
 #advisor > * { pointer-events: auto; }
 #adv-face { position: relative; width: 52px; height: 52px; border-radius: 50%; border: 2px solid var(--gold); background: #2a2216; padding: 0; flex: none; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
-#adv-face svg { width: 100%; height: 100%; display: block; border-radius: 50%; }
+#adv-face svg, #adv-face img { width: 100%; height: 100%; display: block; border-radius: 50%; object-fit: cover; }
+.title-screen { background-size: cover; background-position: center; }
 #adv-face .badge { position: absolute; right: -4px; top: -4px; }
 #adv-face.talk { animation: talk .5s ease-out; }
 #adv-face.alarm { border-color: var(--red); animation: alarm 1s ease-in-out infinite; }
@@ -145,6 +146,23 @@ a { color: var(--gold); }
 .adv-msg.urgent { color: #8a1a1a; font-weight: 700; }
 .adv-msg.jumpable { cursor: pointer; }
 .adv-msg.jumpable:hover { background: rgba(35,29,20,.06); }
+#zoombtns { position: absolute; right: 10px; bottom: 10px; z-index: 7; display: flex; flex-direction: column; gap: 6px; }
+#zoombtns button { width: 42px; height: 42px; border-radius: 10px; background: rgba(19,22,29,.92); border: 1px solid var(--line); font-size: 22px; font-weight: 700; line-height: 1; color: var(--ink); }
+#zoombtns button:active { background: var(--gold); color: #1a1408; }
+#card { right: 62px !important; }
+#arrows { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
+.offarrow { position: absolute; width: 38px; height: 38px; margin: -19px 0 0 -19px; border-radius: 50%; background: rgba(10,12,16,.82); border: 2px solid var(--c); pointer-events: auto; display: flex; align-items: center; justify-content: center; }
+.offarrow i { position: absolute; inset: 0; }
+.offarrow i::after { content: ''; position: absolute; right: -9px; top: 50%; margin-top: -7px; border: 7px solid transparent; border-left: 9px solid var(--c); }
+.offarrow b { font-size: 12px; color: #fff; }
+.offarrow.urgent { background: rgba(80,10,10,.9); animation: alarm 1s ease-in-out infinite; }
+#adv-tut { display: none; position: absolute; left: 60px; top: 0; width: min(360px, calc(100vw - 90px)); background: #f6eed8; color: var(--paperInk); border: 2px solid var(--gold); border-radius: 10px; padding: 9px 12px; font-family: 'Old Standard TT', serif; font-size: 15px; line-height: 1.35; box-shadow: 0 6px 20px rgba(0,0,0,.5); }
+#adv-tut.show { display: block; }
+#adv-tut small { display: block; font-family: 'Libre Franklin'; font-size: 11px; color: #8a6a1a; letter-spacing: .5px; text-transform: uppercase; margin-bottom: 3px; }
+#adv-tut .skip { display: block; margin-top: 6px; font-family: 'Libre Franklin'; font-size: 11px; color: #6a5f4a; text-decoration: underline; padding: 0; }
+#adv-bubble.show ~ #adv-tut { display: none; }
+.tut-glow { animation: tutglow 1.2s ease-in-out infinite; position: relative; z-index: 8; }
+@keyframes tutglow { 50% { box-shadow: 0 0 0 4px rgba(216,178,90,.75), 0 0 18px rgba(216,178,90,.6); } }
 #boxsel { display: none; position: absolute; border: 1.5px dashed #fff; background: rgba(255,255,255,.08); z-index: 5; pointer-events: none; }
 #selbar { position: absolute; left: 10px; bottom: 10px; z-index: 5; display: none; background: rgba(19,22,29,.96); border: 1px solid var(--line); border-radius: 12px; padding: 9px 11px; max-width: min(640px, calc(100% - 200px)); box-shadow: 0 10px 30px rgba(0,0,0,.6); }
 #selbar.show { display: block; }
@@ -221,6 +239,10 @@ h4.sub { margin: 14px 0 6px; color: var(--gold); font-family: Limelight, serif; 
   #selbar { left: 6px; right: 6px; bottom: 6px; max-width: none; padding: 8px; }
   #card { right: 6px; left: 6px; width: auto; bottom: 6px; max-height: 55%; }
   .has-card #selbar { display: none !important; }
+  #zoombtns { top: 52%; bottom: auto; right: 6px; }
+  #zoombtns button { width: 40px; height: 40px; }
+  #card { right: 6px !important; }
+  #adv-tut { left: 52px; font-size: 14px; }
   #mmhost { top: 8px; right: 6px; }
   .minimap { width: 128px !important; height: 72px !important; }
   #maptools { top: 8px; left: 6px; }

@@ -9,6 +9,7 @@ import { BUILDING_RES, INSET, buildingArt, burnedArt, type BuildingArt } from '.
 import { SPRITE_RES, carFrame, corpse, dot, flag, glow, lampPost, personFrames, tree, type PersonLook } from './tex/sprites';
 import { artRng, hex, mix, mul, toScreen, toWorld, TW, TH } from './iso';
 import { propArt, type PropKind } from './tex/props';
+import type { ArtPack } from './artPack';
 import { Ambient } from './ambient';
 import type { Session } from '../session/Session';
 
@@ -18,9 +19,10 @@ export type Hit =
   | { k: 'building'; b: Building }
   | { k: 'ground'; x: number; y: number };
 
-interface BSprite { b: Building; art: BuildingArt; spr: Sprite; lit: Sprite; flag: Sprite; burned: Texture | null; dayTex: Texture; depth: number; poly: number[]; fade: number }
-interface USprite { root: Container; body: Sprite; shadow: Sprite; frames: Texture[]; key: string; seen: number }
-interface VSprite { root: Container; body: Sprite; key: string; frames: { tex: Texture; ax: number; ay: number }[]; head: Sprite; seen: number }
+interface BSprite { b: Building; art: BuildingArt; spr: Sprite; lit: Sprite; flag: Sprite; burned: Texture | null; dayTex: Texture; depth: number; poly: number[]; fade: number; custom: boolean }
+interface USprite { root: Container; body: Sprite; shadow: Sprite; frames: Texture[]; key: string; seen: number; base?: number; single?: boolean }
+interface CarFrame { tex: Texture; ax: number; ay: number; s: number; flip: boolean; tintable: boolean }
+interface VSprite { root: Container; body: Sprite; key: string; frames: CarFrame[]; head: Sprite; seen: number; color?: number }
 
 const CIV_COATS = [0x6a5a4a, 0x4a5a6a, 0x7a6a50, 0x5a4a5a, 0x3a4a3a, 0x8a7a6a, 0x5a5048, 0x6a4038];
 const CIV_CARS = [0x2a2a2a, 0x4a3a2a, 0x2a3a4a, 0x5a2a2a, 0x3a4a3a, 0xc9a23a, 0x2a2a3a];
@@ -51,7 +53,7 @@ export class WorldRenderer {
   private lampGlows: Sprite[] = [];
   private props: Sprite[] = [];
   private texCache = new Map<string, Texture[]>();
-  private carCache = new Map<string, { tex: Texture; ax: number; ay: number }[]>();
+  private carCache = new Map<string, CarFrame[]>();
   private glowTex: Texture;
   private headTex: Texture;
   private dotTex: Texture;
@@ -71,7 +73,7 @@ export class WorldRenderer {
   selectedBuilding = -1;
   highlight: number[] = [];
 
-  constructor(public app: Application, public map: MapData, private sess: Session) {
+  constructor(public app: Application, public map: MapData, private sess: Session, private pack: ArtPack | null = null) {
     this.explored = new Uint8Array(map.w * map.h);
     this.groundG = drawGround(map);
     this.objects.sortableChildren = true;
@@ -159,16 +161,16 @@ export class WorldRenderer {
         const frames = this.carTex('park-' + color, color, rnd() < 0.2 ? 'roadster' : 'sedan');
         const fr = frames[along];
         const sp = new Sprite(fr.tex);
-        sp.anchor.set(fr.ax, fr.ay);
-        sp.scale.set(1 / SPRITE_RES);
+        this.applyCar(sp, fr, color, 0xffffff);
+        this.parked.push({ sp, fr, color });
         const q = toScreen(cx, cy);
         sp.position.set(q.x, q.y);
         sp.zIndex = cx + cy;
         this.objects.addChild(sp);
-        this.props.push(sp);
       }
     }
   }
+  private parked: { sp: Sprite; fr: CarFrame; color: number }[] = [];
 
   // ---------- camera ----------
   setCamera(x: number, y: number, zoom = this.zoom) {
@@ -220,13 +222,37 @@ export class WorldRenderer {
     const hat = u.hero ? 0xd8d0c0 : u.boss ? 0x1a1a1a : mix(color, 0x101010, 0.6);
     return { key: `${u.fam}-${kind}-${u.id % 5}-${u.hero ? 1 : 0}`, look: { coat, hat, pants: 0x24242a, skin, kind } };
   }
-  private carTex(key: string, color: number, model: string) {
+  private carTex(key: string, color: number, model: string): CarFrame[] {
+    const front = this.pack?.car(model, 'front') ?? (model === 'taxi' ? this.pack?.car('sedan', 'front') : null);
+    const rear = this.pack?.car(model, 'rear') ?? (model === 'taxi' ? this.pack?.car('sedan', 'rear') : null);
+    if (front && rear) {
+      const f = (tex: Texture, flip: boolean): CarFrame => ({ tex, ax: 0.5, ay: 0.8, s: 104 / tex.width, flip, tintable: true });
+      return [f(front, false), f(front, true), f(rear, true), f(rear, false)];
+    }
     let t = this.carCache.get(key);
     if (!t) {
-      t = [0, 1, 2, 3].map((d) => { const f = carFrame({ body: color, model: model as 'sedan' }, d); return { tex: Texture.from(f.cv), ax: f.ox / (f.cv.width / SPRITE_RES), ay: f.oy / (f.cv.height / SPRITE_RES) }; });
+      t = [0, 1, 2, 3].map((d) => { const fr = carFrame({ body: color, model: model as 'sedan' }, d); return { tex: Texture.from(fr.cv), ax: fr.ox / (fr.cv.width / SPRITE_RES), ay: fr.oy / (fr.cv.height / SPRITE_RES), s: 1 / SPRITE_RES, flip: false, tintable: false }; });
       this.carCache.set(key, t);
     }
     return t;
+  }
+  private applyCar(sp: Sprite, fr: CarFrame, color: number, ambient: number) {
+    sp.texture = fr.tex;
+    sp.anchor.set(fr.ax, fr.ay);
+    sp.scale.set((fr.flip ? -1 : 1) * fr.s, fr.s);
+    // imported cars are painted light grey so each family can colour them
+    sp.tint = fr.tintable ? mul(mix(color, 0xffffff, 0.25), ambient) : ambient;
+  }
+  /** Imported character art for a unit, if the art pack has some. */
+  private packPerson(u: Unit, view: ViewState): Texture | null {
+    if (!this.pack || this.pack.empty) return null;
+    const fam = u.cop ? 'police' : (view.families[u.fam]?.short ?? '').toLowerCase();
+    const keys: string[] = [];
+    if (u.hero && view.mode === 'campaign') keys.push('nico');
+    if (u.boss && u.tag) keys.push(u.tag);
+    if (u.boss) keys.push(fam + '-boss');
+    keys.push(fam);
+    return this.pack.person(keys, u.id);
   }
 
   // ---------- buildings ----------
@@ -234,6 +260,8 @@ export class WorldRenderer {
     if (this.buildings.size || !view.buildings.length) return;
     for (const b of view.buildings) {
       if (b.type === 'park' || b.type === 'water' || b.type === 'plaza') continue;
+      const custom = this.pack?.building(b.type, BTYPES[b.type].look, b.size, b.seed) ?? null;
+      if (custom) { this.addCustomBuilding(b, custom); continue; }
       const art = buildingArt(b);
       const dayTex = Texture.from(art.day);
       const spr = new Sprite(dayTex);
@@ -258,8 +286,33 @@ export class WorldRenderer {
       const s = b.size - INSET * 2;
       const T = toScreen(b.x + INSET, b.y + INSET), R = toScreen(b.x + INSET + s, b.y + INSET), B = toScreen(b.x + INSET + s, b.y + INSET + s), L = toScreen(b.x + INSET, b.y + INSET + s);
       const Hh = art.height + (b.type === 'church' ? 60 : 12);
-      this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex, depth, fade: 1, poly: [T.x, T.y - Hh, R.x, R.y - Hh, R.x, R.y, B.x, B.y, L.x, L.y, L.x, L.y - Hh] });
+      this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex, depth, fade: 1, custom: false, poly: [T.x, T.y - Hh, R.x, R.y - Hh, R.x, R.y, B.x, B.y, L.x, L.y, L.x, L.y - Hh] });
     }
+  }
+
+  /** A building drawn from an imported picture: the footprint's lower corner sits on the bottom of the image. */
+  private addCustomBuilding(b: Building, tex: Texture) {
+    const s = b.size - INSET * 2;
+    const B = toScreen(b.x + INSET + s, b.y + INSET + s);
+    const scale = (s * 64) / tex.width;
+    const h = tex.height * scale;
+    const spr = new Sprite(tex);
+    spr.anchor.set(0.5, 1);
+    spr.scale.set(scale);
+    spr.position.set(B.x, B.y + 2);
+    const depth = b.x + b.y + b.size;
+    spr.zIndex = depth;
+    const lit = new Sprite(Texture.EMPTY);
+    lit.alpha = 0;
+    const fl = new Sprite(this.flagTex);
+    fl.anchor.set(0.05, 1);
+    fl.scale.set(1 / SPRITE_RES);
+    fl.position.set(B.x + s * 14, B.y - h * 0.9);
+    fl.zIndex = depth + 0.002;
+    this.objects.addChild(spr, fl);
+    const art: BuildingArt = { day: null as unknown as HTMLCanvasElement, lit: null as unknown as HTMLCanvasElement, ox: 0, oy: 0, w: s * 64, h, flag: { x: 0, y: 0 }, height: Math.max(20, h - s * 32) };
+    const poly = [B.x - s * 32, B.y - h, B.x + s * 32, B.y - h, B.x + s * 32, B.y - s * 16, B.x, B.y, B.x - s * 32, B.y - s * 16];
+    this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex: tex, depth, fade: 1, custom: true, poly });
   }
 
   private drawOwners(view: ViewState) {
@@ -325,10 +378,10 @@ export class WorldRenderer {
       bs.fade += (target - bs.fade) * Math.min(1, dt * 8);
       bs.spr.alpha = bs.fade;
       bs.flag.alpha = bs.fade;
-      if (b.burned && !bs.burned) bs.burned = Texture.from(burnedArt(bs.art));
+      if (b.burned && !bs.burned && !bs.custom) bs.burned = Texture.from(burnedArt(bs.art));
       bs.spr.texture = b.burned && bs.burned ? bs.burned : bs.dayTex;
       const fogDim = vis && !seen(b.door.x, b.door.y) ? (this.explored[Math.floor(b.door.y) * this.map.w + Math.floor(b.door.x)] ? 0.62 : 0.45) : 1;
-      bs.spr.tint = mul(ambient, mix(0x000000, 0xffffff, fogDim));
+      bs.spr.tint = mul(ambient, mix(0x000000, 0xffffff, fogDim * (bs.custom && b.burned ? 0.35 : 1)));
       bs.lit.alpha = b.burned ? 0 : nf * (b.racket ? 1 : 0.85) * (b.type === 'warehouse' ? 0.6 : 1);
       bs.lit.alpha *= bs.fade;
       bs.lit.visible = bs.lit.alpha > 0.02;
@@ -337,6 +390,7 @@ export class WorldRenderer {
       if (f) { bs.flag.tint = mul(hex(f.color), ambient); bs.flag.skew.x = Math.sin(this.time * 3 + b.id) * 0.06; }
     }
     for (const s of this.props) s.tint = ambient;
+    for (const c of this.parked) this.applyCar(c.sp, c.fr, c.color, ambient);
     for (const g of this.lampGlows) { g.alpha = nf * 0.75; g.visible = nf > 0.05; }
 
     // events
@@ -372,19 +426,22 @@ export class WorldRenderer {
       const show = (u.loc === 'street') && (u.fam === this.sess.fam || seen(u.x, u.y));
       let us = this.units.get(u.id);
       if (!show) { if (us) us.root.visible = false; continue; }
-      const { key, look } = this.lookFor(u, view);
+      const custom = this.packPerson(u, view);
+      const { key: baseKey, look } = this.lookFor(u, view);
+      const key = custom ? 'pk:' + custom.uid : baseKey;
       if (!us || us.key !== key) {
         if (us) us.root.destroy({ children: true });
-        const frames = this.personTex(key, look);
+        const frames = custom ? [custom, custom, custom, custom] : this.personTex(key, look);
         const root = new Container();
         const shadow = new Sprite(this.dotTex);
         shadow.anchor.set(0.5); shadow.tint = 0; shadow.alpha = 0.45; shadow.scale.set(0.7, 0.3);
         const body = new Sprite(frames[0]);
-        body.anchor.set(0.5, 37 / 40);
-        body.scale.set(1 / SPRITE_RES);
+        body.anchor.set(0.5, custom ? 0.97 : 37 / 40);
+        const base = custom ? 46 / custom.height : 1 / SPRITE_RES;
+        body.scale.set(base);
         root.addChild(shadow, body);
         this.objects.addChild(root);
-        us = { root, body, shadow, frames, key, seen: now };
+        us = { root, body, shadow, frames, key, seen: now, base, single: !!custom };
         this.units.set(u.id, us);
       }
       us.seen = now;
@@ -398,10 +455,13 @@ export class WorldRenderer {
       const walking = u.moving || u.path.length > 0;
       const frame = aiming ? 3 : walking ? 1 + (Math.floor(now * 7 + u.id) % 2) : 0;
       us.body.texture = us.frames[frame];
-      us.body.scale.x = (u.face >= 0 ? 1 : -1) / SPRITE_RES;
-      const big = u.hero || u.boss ? 1.12 : 1;
-      us.body.scale.y = big / SPRITE_RES;
-      us.body.scale.x *= big;
+      const big = (u.hero || u.boss ? 1.12 : 1) * (us.base ?? 1 / SPRITE_RES);
+      us.body.scale.set((u.face >= 0 ? 1 : -1) * big, big);
+      if (us.single) {
+        // one still picture: bob while walking, lean when shooting
+        us.body.y = walking ? -Math.abs(Math.sin(now * 10 + u.id)) * 2.5 : 0;
+        us.body.rotation = aiming ? 0.06 * (u.face >= 0 ? 1 : -1) : walking ? Math.sin(now * 10 + u.id) * 0.04 : 0;
+      }
       const hurt = (this.hurtUntil.get(u.id) ?? 0) > now;
       us.body.tint = hurt ? 0xff5a4a : mix(ambient, 0xffffff, 0.35);
     }
@@ -422,10 +482,9 @@ export class WorldRenderer {
         const head = new Sprite(this.headTex);
         head.anchor.set(0.1, 0.5); head.blendMode = 'add'; head.scale.set(0.9, 0.9);
         const body = new Sprite(frames[0].tex);
-        body.scale.set(1 / SPRITE_RES);
         root.addChild(head, body);
         this.objects.addChild(root);
-        vs = { root, body, key, frames, head, seen: now };
+        vs = { root, body, key, frames, head, seen: now, color };
         this.vehicles.set(v.id, vs);
       }
       vs.seen = now;
@@ -435,13 +494,17 @@ export class WorldRenderer {
       vs.root.position.set(sp.x, sp.y);
       vs.root.zIndex = p.x + p.y + 0.001;
       const fr = vs.frames[v.face] ?? vs.frames[0];
-      vs.body.texture = fr.tex;
-      vs.body.anchor.set(fr.ax, fr.ay);
-      vs.body.tint = ambient;
+      this.applyCar(vs.body, fr, vs.color ?? color, ambient);
       vs.head.alpha = nf * 0.6;
       vs.head.visible = nf > 0.1;
       const dirv = [toScreen(1, 0), toScreen(0, 1), toScreen(-1, 0), toScreen(0, -1)][v.face];
       vs.head.rotation = Math.atan2(dirv.y, dirv.x);
+      // exhaust puffs while driving
+      if (v.path.length && Math.random() < dt * 14) {
+        const back = [[-1, 0], [0, -1], [1, 0], [0, 1]][v.face];
+        const q = toScreen(p.x + back[0] * 0.75, p.y + back[1] * 0.75);
+        this.sparks.push({ x: q.x, y: q.y - 6, vx: (Math.random() - 0.5) * 10, vy: -12 - Math.random() * 10, life: 0.9, max: 0.9, color: 0x9a9a98, size: 2.5 + Math.random() * 2.5, grav: -6 });
+      }
     }
     for (const [id, vs] of this.vehicles) if (vs.seen !== now) { vs.root.destroy({ children: true }); this.vehicles.delete(id); }
 
@@ -463,20 +526,23 @@ export class WorldRenderer {
           const frames = this.carTex('civ-' + color + (w.look === 5 ? 't' : ''), color, w.look === 5 ? 'taxi' : 'sedan');
           const root = new Container();
           const head = new Sprite(this.headTex); head.anchor.set(0.1, 0.5); head.blendMode = 'add';
-          const body = new Sprite(frames[0].tex); body.scale.set(1 / SPRITE_RES);
+          const body = new Sprite(frames[0].tex);
           root.addChild(head, body);
           this.objects.addChild(root);
-          s = { root, body, key: 'c', frames, head, seen: 0 } as VSprite;
+          s = { root, body, key: 'c', frames, head, seen: 0, color } as VSprite;
         } else {
           const coat = CIV_COATS[w.look];
           const look: PersonLook = { coat, hat: mix(coat, 0x111111, 0.5), pants: 0x2a2a30, skin: [0xe0b898, 0xc89a78, 0x9a6a4a, 0x6a4a32][w.look % 4], kind: w.look % 3 === 0 ? 'woman' : 'civ' };
-          const frames = this.personTex('civ' + w.look, look);
+          const custom = this.pack?.person(['civilian'], w.look) ?? null;
+          const frames = custom ? [custom, custom, custom, custom] : this.personTex('civ' + w.look, look);
           const root = new Container();
           const shadow = new Sprite(this.dotTex); shadow.anchor.set(0.5); shadow.tint = 0; shadow.alpha = 0.4; shadow.scale.set(0.6, 0.26);
-          const body = new Sprite(frames[0]); body.anchor.set(0.5, 37 / 40); body.scale.set(1 / SPRITE_RES);
+          const body = new Sprite(frames[0]); body.anchor.set(0.5, custom ? 0.97 : 37 / 40);
+          const base = custom ? 44 / custom.height : 1 / SPRITE_RES;
+          body.scale.set(base);
           root.addChild(shadow, body);
           this.objects.addChild(root);
-          s = { root, body, shadow, frames, key: 'p', seen: 0 } as USprite;
+          s = { root, body, shadow, frames, key: 'p', seen: 0, base, single: !!custom } as USprite;
         }
         this.civs.set(w.id, s);
       }
@@ -487,7 +553,7 @@ export class WorldRenderer {
       if (w.car) {
         const vs = s as VSprite;
         const fr = vs.frames[w.dir];
-        vs.body.texture = fr.tex; vs.body.anchor.set(fr.ax, fr.ay); vs.body.tint = ambient;
+        this.applyCar(vs.body, fr, vs.color ?? 0x2a2a2a, ambient);
         const nf = nightFactor(view.hour);
         vs.head.alpha = nf * 0.5; vs.head.visible = nf > 0.1;
         const dirv = [toScreen(1, 0), toScreen(0, 1), toScreen(-1, 0), toScreen(0, -1)][w.dir];
@@ -495,7 +561,9 @@ export class WorldRenderer {
       } else {
         const us = s as USprite;
         us.body.texture = us.frames[w.moving ? 1 + (Math.floor(this.time * (w.panic > 0 ? 11 : 6) + w.id) % 2) : 0];
-        us.body.scale.x = (w.face >= 0 ? 1 : -1) / SPRITE_RES;
+        const base = us.base ?? 1 / SPRITE_RES;
+        us.body.scale.set((w.face >= 0 ? 1 : -1) * base, base);
+        if (us.single) us.body.y = w.moving ? -Math.abs(Math.sin(this.time * 10 + w.id)) * 2 : 0;
         us.body.tint = mix(ambient, 0x000000, 0.08);
       }
     }

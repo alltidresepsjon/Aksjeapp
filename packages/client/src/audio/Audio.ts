@@ -1,5 +1,6 @@
 // Synthesised sound effects and a small jazz loop, all with Web Audio (no sound files needed).
-// If a file exists in /assets/audio/<name>.ogg it is used instead of the synthesised sound.
+// Recorded sounds and music in /assets/audio/<name>.mp3 are used when present (see CREDITS.md);
+// the synthesised versions are the fallback.
 
 import type { WeaponId } from '@bg/shared';
 
@@ -41,7 +42,8 @@ export class AudioEngine {
     this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    for (const n of ['shot-revolver', 'shot-shotgun', 'shot-tommy', 'shot-rifle', 'siren', 'cash', 'music-day', 'music-night']) void this.tryLoad(n);
+    for (const n of ['shot-revolver', 'shot-dual', 'shot-shotgun', 'shot-tommy', 'shot-rifle', 'siren', 'engine', 'cash']) void this.tryLoad(n);
+    for (const n of ['music-day', 'music-day-2', 'music-night']) void this.tryLoad(n).then(() => this.maybeStartTracks());
   }
   applyVolume() {
     if (!this.ctx) return;
@@ -51,16 +53,17 @@ export class AudioEngine {
   }
   private async tryLoad(name: string) {
     try {
-      const r = await fetch(`/assets/audio/${name}.ogg`);
+      const r = await fetch(`/assets/audio/${name}.mp3`);
       if (!r.ok || !(r.headers.get('content-type') ?? '').includes('audio')) { this.files.set(name, null); return; }
       this.files.set(name, await this.ctx!.decodeAudioData(await r.arrayBuffer()));
     } catch { this.files.set(name, null); }
   }
-  private playFile(name: string, vol: number): boolean {
+  private playFile(name: string, vol: number, rate = 1): boolean {
     const buf = this.files.get(name);
     if (!buf || !this.ctx) return false;
     const s = this.ctx.createBufferSource();
     s.buffer = buf;
+    s.playbackRate.value = rate;
     const g = this.ctx.createGain(); g.gain.value = vol;
     s.connect(g).connect(this.sfxBus);
     s.start();
@@ -99,8 +102,8 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
     if (now - this.lastShot < 0.02) return;
     this.lastShot = now;
-    const name = w === 'dual' ? 'shot-revolver' : 'shot-' + w;
-    if (this.playFile(name, vol)) return;
+    const name = 'shot-' + w;
+    if (this.playFile(name, vol * (w === 'tommy' ? 0.75 : 0.9), 0.9 + Math.random() * 0.2)) return;
     if (w === 'shotgun') { this.burst(now, 0.35, 700, 0.6, vol * 0.9, 'lowpass'); this.tone(now, 110, 0.18, vol * 0.5, 'triangle', undefined, 40); }
     else if (w === 'tommy') { this.burst(now, 0.07, 1800, 1.2, vol * 0.45); this.tone(now, 160, 0.05, vol * 0.25, 'square', undefined, 80); }
     else if (w === 'rifle') { this.burst(now, 0.4, 2400, 0.7, vol * 0.8); this.burst(now + 0.05, 0.5, 600, 0.5, vol * 0.3, 'lowpass'); }
@@ -121,6 +124,7 @@ export class AudioEngine {
     this.tone(t + 0.07, 2093, 0.35, 0.15, 'triangle');
     this.burst(t, 0.12, 5000, 2, 0.06, 'highpass');
   }
+  engine(vol = 0.5) { this.playFile('engine', vol, 0.95 + Math.random() * 0.1); }
   click() { if (this.ctx) this.tone(this.ctx.currentTime, 900, 0.05, 0.06, 'square'); }
   alert() { if (!this.ctx) return; const t = this.ctx.currentTime; this.tone(t, 523, 0.15, 0.12, 'square'); this.tone(t + 0.16, 392, 0.22, 0.12, 'square'); }
   fanfare() { if (!this.ctx) return; const t = this.ctx.currentTime; [523, 659, 784, 1047].forEach((f, i) => this.tone(t + i * 0.12, f, 0.4, 0.12, 'triangle')); }
@@ -128,13 +132,56 @@ export class AudioEngine {
   fire() { if (!this.ctx) return; const t = this.ctx.currentTime; this.burst(t, 1.5, 400, 0.4, 0.25, 'lowpass'); }
 
   // ---------- music: walking bass, brushes, comping piano ----------
+  private tracks: { day: AudioBufferSourceNode | null; night: AudioBufferSourceNode | null; dayGain: GainNode | null; nightGain: GainNode | null } = { day: null, night: null, dayGain: null, nightGain: null };
+  private wantMusic = false;
+  private dayIdx = 0;
+  private maybeStartTracks() {
+    if (!this.wantMusic || !this.ctx || this.tracks.dayGain) return;
+    const day = this.files.get('music-day'), night = this.files.get('music-night');
+    if (!day || !night) return;
+    clearInterval(this.musicTimer); this.musicTimer = 0;
+    const c = this.ctx;
+    this.tracks.dayGain = c.createGain(); this.tracks.nightGain = c.createGain();
+    this.tracks.dayGain.connect(this.musicBus); this.tracks.nightGain.connect(this.musicBus);
+    this.tracks.dayGain.gain.value = this.night ? 0 : 1;
+    this.tracks.nightGain.gain.value = this.night ? 1 : 0;
+    const startDay = () => {
+      const list = [this.files.get('music-day'), this.files.get('music-day-2')].filter((b): b is AudioBuffer => !!b);
+      const src = c.createBufferSource();
+      src.buffer = list[this.dayIdx++ % list.length];
+      src.connect(this.tracks.dayGain!);
+      src.onended = () => { if (this.tracks.day === src && this.wantMusic) startDay(); };
+      src.start();
+      this.tracks.day = src;
+    };
+    startDay();
+    const n = c.createBufferSource();
+    n.buffer = night; n.loop = true; n.connect(this.tracks.nightGain); n.start();
+    this.tracks.night = n;
+  }
+  private crossfade() {
+    if (!this.ctx || !this.tracks.dayGain) return;
+    const t = this.ctx.currentTime;
+    this.tracks.dayGain.gain.cancelScheduledValues(t);
+    this.tracks.nightGain!.gain.cancelScheduledValues(t);
+    this.tracks.dayGain.gain.setTargetAtTime(this.night ? 0 : 1, t, 1.5);
+    this.tracks.nightGain!.gain.setTargetAtTime(this.night ? 1 : 0, t, 1.5);
+  }
   startMusic() {
+    this.wantMusic = true;
+    if (this.ctx && this.files.get('music-day') && this.files.get('music-night')) { this.maybeStartTracks(); return; }
     if (!this.ctx || this.musicTimer) return;
     this.nextBar = this.ctx.currentTime + 0.1;
     this.musicTimer = window.setInterval(() => this.schedule(), 200);
   }
-  stopMusic() { clearInterval(this.musicTimer); this.musicTimer = 0; }
-  setNight(n: boolean) { this.night = n; }
+  stopMusic() {
+    this.wantMusic = false;
+    clearInterval(this.musicTimer); this.musicTimer = 0;
+    try { this.tracks.day?.stop(); this.tracks.night?.stop(); } catch { /* already stopped */ }
+    this.tracks.dayGain?.disconnect(); this.tracks.nightGain?.disconnect();
+    this.tracks = { day: null, night: null, dayGain: null, nightGain: null };
+  }
+  setNight(n: boolean) { this.night = n; this.crossfade(); }
   private schedule() {
     const c = this.ctx!;
     while (this.nextBar < c.currentTime + 0.6) { this.playBar(this.nextBar); this.nextBar += this.night ? 2.6 : 2.2; this.bar++; }

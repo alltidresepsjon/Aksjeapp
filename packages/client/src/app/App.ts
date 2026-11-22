@@ -9,6 +9,7 @@ import { Game, HELP_HTML } from './Game';
 import { LocalSession } from '../session/LocalSession';
 import { Net, NetSession } from '../session/NetSession';
 import { audio } from '../audio/Audio';
+import { loadArtPack } from '../render/artPack';
 import { $, $$, el, esc, money, statIcons } from '../ui/dom';
 
 const SAVE_KEY = 'bg-campaign-v1';
@@ -30,6 +31,7 @@ export class App {
   private persist() { if (this.save) localStorage.setItem(SAVE_KEY, JSON.stringify(this.save)); }
   private show(html: string, cls = '') {
     this.screen.className = 'screen ' + cls;
+    this.screen.style.backgroundImage = '';
     this.screen.innerHTML = html;
     this.screen.style.display = 'flex';
     this.screen.scrollTop = 0;
@@ -51,6 +53,7 @@ export class App {
       </div>
       <p class="credits">An original game about Prohibition, family and revenge. Works on PC and mobile.</p>
     </div>`, 'title-screen');
+    void loadArtPack().then((p) => { const bg = p.ui('title'); if (bg) this.screen.style.backgroundImage = `linear-gradient(rgba(5,6,8,.55), rgba(5,6,8,.9)), url(${bg})`; });
     this.screen.onclick = (e) => {
       const g = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
       if (g === 'continue') this.safehouseOrBriefing();
