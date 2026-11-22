@@ -185,7 +185,7 @@ export interface Ad {
 export interface NewsItem { day: number; hour: number; text: string; big: boolean; fam?: FamId }
 
 export type GameEvent =
-  | { id: number; k: 'shot'; x: number; y: number; tx: number; ty: number; w: WeaponId; hit: boolean; fam: FamId }
+  | { id: number; k: 'shot'; x: number; y: number; tx: number; ty: number; w: WeaponId; hit: boolean; fam: FamId; t?: number }
   | { id: number; k: 'death'; x: number; y: number; fam: FamId; name: string }
   | { id: number; k: 'capture'; b: number; fam: FamId; prev: FamId | null }
   | { id: number; k: 'fire'; b: number }

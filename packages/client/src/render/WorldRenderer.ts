@@ -7,7 +7,8 @@ import {
 import { drawGround } from './ground';
 import { BUILDING_RES, INSET, buildingArt, burnedArt, type BuildingArt } from './tex/buildings';
 import { SPRITE_RES, carFrame, corpse, dot, flag, glow, lampPost, personFrames, tree, type PersonLook } from './tex/sprites';
-import { hex, mix, mul, toScreen, toWorld, TW, TH } from './iso';
+import { artRng, hex, mix, mul, toScreen, toWorld, TW, TH } from './iso';
+import { propArt, type PropKind } from './tex/props';
 import { Ambient } from './ambient';
 import type { Session } from '../session/Session';
 
@@ -17,7 +18,7 @@ export type Hit =
   | { k: 'building'; b: Building }
   | { k: 'ground'; x: number; y: number };
 
-interface BSprite { b: Building; art: BuildingArt; spr: Sprite; lit: Sprite; flag: Sprite; burned: Texture | null; dayTex: Texture; depth: number; poly: number[] }
+interface BSprite { b: Building; art: BuildingArt; spr: Sprite; lit: Sprite; flag: Sprite; burned: Texture | null; dayTex: Texture; depth: number; poly: number[]; fade: number }
 interface USprite { root: Container; body: Sprite; shadow: Sprite; frames: Texture[]; key: string; seen: number }
 interface VSprite { root: Container; body: Sprite; key: string; frames: { tex: Texture; ax: number; ay: number }[]; head: Sprite; seen: number }
 
@@ -44,7 +45,9 @@ export class WorldRenderer {
   private civs = new Map<number, USprite | VSprite>();
   private corpses: { s: Sprite; life: number }[] = [];
   private tracers: { x0: number; y0: number; x1: number; y1: number; life: number; color: number }[] = [];
-  private flashes: { s: Sprite; life: number }[] = [];
+  private flashes: { s: Sprite; life: number; max: number }[] = [];
+  private sparks: { x: number; y: number; vx: number; vy: number; life: number; max: number; color: number; size: number; grav: number }[] = [];
+  private hurtUntil = new Map<number, number>();
   private lampGlows: Sprite[] = [];
   private props: Sprite[] = [];
   private texCache = new Map<string, Texture[]>();
@@ -107,8 +110,64 @@ export class WorldRenderer {
       this.objects.addChild(s);
       this.props.push(s);
     });
+    this.placeStreetProps();
     this.ambient = new Ambient(map);
     void PathFinder;
+  }
+
+  /** Street furniture and parked cars along the sidewalks (cosmetic). */
+  private placeStreetProps() {
+    const map = this.map;
+    const rnd = artRng(map.w * 131 + map.h * 7 + map.lots.length);
+    const tex = new Map<PropKind, { t: Texture; ax: number; ay: number }>();
+    const get = (k: PropKind) => {
+      let v = tex.get(k);
+      if (!v) { const a = propArt(k); v = { t: Texture.from(a.cv), ax: a.ax, ay: a.ay }; tex.set(k, v); }
+      return v;
+    };
+    const tile = (x: number, y: number) => (x < 0 || y < 0 || x >= map.w || y >= map.h ? -1 : map.tiles[y * map.w + x]);
+    const nearDoor = (x: number, y: number, r: number) => map.lots.some((l) => Math.hypot(l.door.x - x, l.door.y - y) < r);
+    const lotNear = (x: number, y: number) => map.lots.find((l) => x >= l.x - 1 && x <= l.x + l.size && y >= l.y - 1 && y <= l.y + l.size);
+    const kinds: PropKind[] = ['hydrant', 'mailbox', 'trash', 'bench', 'newsstand', 'clock', 'hydrant', 'trash'];
+    for (let y = 0; y < map.h; y++) for (let x = 0; x < map.w; x++) {
+      if (tile(x, y) !== 0) continue;
+      const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]].filter(([dx, dy]) => tile(x + dx, y + dy) === 1 || tile(x + dx, y + dy) === 2);
+      if (!dirs.length) continue;
+      const [dx, dy] = dirs[0];
+      const px = x + 0.5 + dx * 0.36, py = y + 0.5 + dy * 0.36;
+      const r = rnd();
+      if (r < 0.075 && !nearDoor(px, py, 1.1)) {
+        const lot = lotNear(x + dx, y + dy);
+        let kind = kinds[Math.floor(rnd() * kinds.length)];
+        if (lot && (lot.type === 'warehouse' || lot.type === 'pier' || lot.type === 'garage')) kind = rnd() < 0.5 ? 'barrels' : 'crates';
+        const a = get(kind);
+        const sp = new Sprite(a.t);
+        sp.anchor.set(a.ax, a.ay);
+        sp.scale.set(1 / SPRITE_RES);
+        const q = toScreen(px, py);
+        sp.position.set(q.x, q.y);
+        sp.zIndex = px + py;
+        this.objects.addChild(sp);
+        this.props.push(sp);
+      } else if (r > 0.955 && !nearDoor(px, py, 1.6)) {
+        // parked car at the kerb, nose along the street
+        const intersection = (x % 8 < 2) && (y % 8 < 2);
+        if (intersection) continue;
+        const cx = x + 0.5 + dx * 0.05, cy = y + 0.5 + dy * 0.05;
+        const along = dy !== 0 ? (rnd() < 0.5 ? 0 : 2) : (rnd() < 0.5 ? 1 : 3);
+        const color = CIV_CARS[Math.floor(rnd() * CIV_CARS.length)];
+        const frames = this.carTex('park-' + color, color, rnd() < 0.2 ? 'roadster' : 'sedan');
+        const fr = frames[along];
+        const sp = new Sprite(fr.tex);
+        sp.anchor.set(fr.ax, fr.ay);
+        sp.scale.set(1 / SPRITE_RES);
+        const q = toScreen(cx, cy);
+        sp.position.set(q.x, q.y);
+        sp.zIndex = cx + cy;
+        this.objects.addChild(sp);
+        this.props.push(sp);
+      }
+    }
   }
 
   // ---------- camera ----------
@@ -199,7 +258,7 @@ export class WorldRenderer {
       const s = b.size - INSET * 2;
       const T = toScreen(b.x + INSET, b.y + INSET), R = toScreen(b.x + INSET + s, b.y + INSET), B = toScreen(b.x + INSET + s, b.y + INSET + s), L = toScreen(b.x + INSET, b.y + INSET + s);
       const Hh = art.height + (b.type === 'church' ? 60 : 12);
-      this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex, depth, poly: [T.x, T.y - Hh, R.x, R.y - Hh, R.x, R.y, B.x, B.y, L.x, L.y, L.x, L.y - Hh] });
+      this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex, depth, fade: 1, poly: [T.x, T.y - Hh, R.x, R.y - Hh, R.x, R.y, B.x, B.y, L.x, L.y, L.x, L.y - Hh] });
     }
   }
 
@@ -243,15 +302,35 @@ export class WorldRenderer {
     this.drawOwners(view);
     this.drawFog(vis);
 
+    // our own people and cars hidden behind a building make it see-through
+    const behind: { x: number; y: number; d: number }[] = [];
+    for (const u of view.units) {
+      if (u.fam !== this.sess.fam || u.loc !== 'street') continue;
+      const p = this.sess.lerpPos(u.id, u.x, u.y);
+      const sp = toScreen(p.x, p.y);
+      behind.push({ x: sp.x, y: sp.y - 20, d: p.x + p.y });
+    }
+    for (const v of view.vehicles) {
+      if (v.fam !== this.sess.fam || v.dead) continue;
+      const sp = toScreen(v.x, v.y);
+      behind.push({ x: sp.x, y: sp.y - 10, d: v.x + v.y });
+    }
+
     // buildings
     for (const bs of this.buildings.values()) {
       const b = view.buildings[bs.b.id] ?? bs.b;
       bs.b = b;
+      const hides = behind.some((q) => q.d < bs.depth - 0.2 && inPoly(q.x, q.y, bs.poly));
+      const target = hides ? 0.3 : 1;
+      bs.fade += (target - bs.fade) * Math.min(1, dt * 8);
+      bs.spr.alpha = bs.fade;
+      bs.flag.alpha = bs.fade;
       if (b.burned && !bs.burned) bs.burned = Texture.from(burnedArt(bs.art));
       bs.spr.texture = b.burned && bs.burned ? bs.burned : bs.dayTex;
       const fogDim = vis && !seen(b.door.x, b.door.y) ? (this.explored[Math.floor(b.door.y) * this.map.w + Math.floor(b.door.x)] ? 0.62 : 0.45) : 1;
       bs.spr.tint = mul(ambient, mix(0x000000, 0xffffff, fogDim));
       bs.lit.alpha = b.burned ? 0 : nf * (b.racket ? 1 : 0.85) * (b.type === 'warehouse' ? 0.6 : 1);
+      bs.lit.alpha *= bs.fade;
       bs.lit.visible = bs.lit.alpha > 0.02;
       const f = b.owner ? view.families[b.owner] : null;
       bs.flag.visible = !!f;
@@ -267,7 +346,7 @@ export class WorldRenderer {
       let visible = true;
       if (e.k === 'shot') {
         visible = seen(e.x, e.y) || seen(e.tx, e.ty);
-        if (visible) this.addShot(e.x, e.y, e.tx, e.ty, e.hit, e.w);
+        if (visible) this.addShot(e.x, e.y, e.tx, e.ty, e.hit, e.w, e.t);
         this.ambient.scare(e.x, e.y);
       } else if (e.k === 'death') {
         visible = seen(e.x, e.y);
@@ -323,7 +402,8 @@ export class WorldRenderer {
       const big = u.hero || u.boss ? 1.12 : 1;
       us.body.scale.y = big / SPRITE_RES;
       us.body.scale.x *= big;
-      us.body.tint = ambient;
+      const hurt = (this.hurtUntil.get(u.id) ?? 0) > now;
+      us.body.tint = hurt ? 0xff5a4a : mix(ambient, 0xffffff, 0.35);
     }
     for (const [id, us] of this.units) if (us.seen !== now) { if (now - us.seen > 2) { us.root.destroy({ children: true }); this.units.delete(id); } else us.root.visible = false; }
 
@@ -421,15 +501,31 @@ export class WorldRenderer {
     }
   }
 
-  private addShot(x0: number, y0: number, x1: number, y1: number, hit: boolean, w: string) {
+  private addShot(x0: number, y0: number, x1: number, y1: number, hit: boolean, w: string, target?: number) {
     const a = toScreen(x0, y0), b = toScreen(x1, y1);
-    const ox = hit ? 0 : (Math.random() - 0.5) * 18, oy = hit ? 0 : (Math.random() - 0.5) * 10;
-    this.tracers.push({ x0: a.x, y0: a.y - 22, x1: b.x + ox, y1: b.y - 18 + oy, life: 0.09, color: w === 'tommy' ? 0xffe08a : 0xfff3c4 });
+    const ox = hit ? 0 : (Math.random() - 0.5) * 26, oy = hit ? 0 : (Math.random() - 0.5) * 14;
+    const sx = a.x + (b.x > a.x ? 9 : -9), sy = a.y - 24;
+    const tx = b.x + ox, ty = b.y - 20 + oy;
+    const pellets = w === 'shotgun' ? 4 : 1;
+    for (let i = 0; i < pellets; i++) {
+      const spread = pellets > 1 ? (Math.random() - 0.5) * 16 : 0;
+      this.tracers.push({ x0: sx, y0: sy, x1: tx + spread, y1: ty + spread * 0.5, life: 0.16, color: w === 'tommy' ? 0xffd070 : w === 'rifle' ? 0xffffff : 0xfff0b0 });
+    }
     const fl = new Sprite(this.dotTex);
-    fl.anchor.set(0.5); fl.blendMode = 'add'; fl.tint = 0xffd070; fl.scale.set(w === 'shotgun' ? 1.1 : 0.7);
-    fl.position.set(a.x + (b.x > a.x ? 8 : -8), a.y - 22);
+    fl.anchor.set(0.5); fl.blendMode = 'add'; fl.tint = 0xffc050;
+    fl.scale.set(w === 'shotgun' || w === 'rifle' ? 1.6 : w === 'tommy' ? 1.1 : 1.2);
+    fl.position.set(sx, sy);
     this.lights.addChild(fl);
-    this.flashes.push({ s: fl, life: 0.07 });
+    this.flashes.push({ s: fl, life: 0.1, max: 0.1 });
+    if (hit) {
+      // blood and a red flash on whoever was hit
+      for (let i = 0; i < 7; i++) this.sparks.push({ x: tx, y: ty, vx: (Math.random() - 0.5) * 90 + (b.x - a.x > 0 ? 40 : -40), vy: -Math.random() * 70, life: 0.45, max: 0.45, color: i % 3 ? 0xb01818 : 0xff4030, size: 1.6 + Math.random() * 1.8, grav: 260 });
+      if (target !== undefined) this.hurtUntil.set(target, this.time + 0.14);
+    } else {
+      // dust where the bullet hit the street
+      const gx = b.x + ox * 1.4, gy = b.y + Math.abs(oy) * 0.4;
+      for (let i = 0; i < 4; i++) this.sparks.push({ x: gx, y: gy, vx: (Math.random() - 0.5) * 40, vy: -20 - Math.random() * 30, life: 0.35, max: 0.35, color: 0xb8ad98, size: 2 + Math.random() * 2, grav: 120 });
+    }
   }
   private addCorpse(x: number, y: number, color?: string) {
     const key = 'corpse-' + (color ?? 'x');
@@ -491,9 +587,24 @@ export class WorldRenderer {
   private drawFx(dt: number, view: ViewState, nf: number) {
     const g = this.fx;
     g.clear();
-    for (const t of this.tracers) { t.life -= dt; g.moveTo(t.x0, t.y0).lineTo(t.x1, t.y1).stroke({ width: 1.6, color: t.color, alpha: Math.max(0, t.life / 0.09) }); }
+    for (const t of this.tracers) {
+      t.life -= dt;
+      const a = Math.max(0, t.life / 0.16);
+      // the bright head travels from gun to target, leaving a fading trail
+      const k = Math.min(1, (0.16 - t.life) / 0.05);
+      const hx = t.x0 + (t.x1 - t.x0) * k, hy = t.y0 + (t.y1 - t.y0) * k;
+      g.moveTo(t.x0, t.y0).lineTo(hx, hy).stroke({ width: 5, color: t.color, alpha: a * 0.18 });
+      g.moveTo(t.x0, t.y0).lineTo(hx, hy).stroke({ width: 1.8, color: t.color, alpha: a * 0.95 });
+    }
     this.tracers = this.tracers.filter((t) => t.life > 0);
-    for (const f of this.flashes) { f.life -= dt; f.s.alpha = Math.max(0, f.life / 0.07); }
+    for (const sp of this.sparks) {
+      sp.life -= dt;
+      sp.vy += sp.grav * dt;
+      sp.x += sp.vx * dt; sp.y += sp.vy * dt;
+      g.circle(sp.x, sp.y, sp.size).fill({ color: sp.color, alpha: Math.max(0, sp.life / sp.max) });
+    }
+    this.sparks = this.sparks.filter((sp) => sp.life > 0);
+    for (const f of this.flashes) { f.life -= dt; f.s.alpha = Math.max(0, f.life / f.max); }
     this.flashes = this.flashes.filter((f) => { if (f.life <= 0) { f.s.destroy(); return false; } return true; });
     // fires
     for (const b of view.buildings) {
@@ -562,12 +673,19 @@ export class WorldRenderer {
       } else if (u.fam === this.sess.fam) {
         fg.ellipse(x, y, 10, 5).stroke({ width: 1.5, color: hex(view.families[u.fam]?.color ?? '#3fbf8a'), alpha: 0.7 });
       }
-      const showBar = u.hp < u.maxHp - 0.5 || sel;
+      const fighting = view.time - u.lastShot < 1.5 || view.time - u.lastHurt < 1.5;
+      if (fighting) {
+        const pulse = 0.5 + 0.5 * Math.sin(this.time * 12);
+        fg.ellipse(x, y, 15 + pulse * 2, 7.5 + pulse).stroke({ width: 2.2, color: 0xff3a2a, alpha: 0.55 + pulse * 0.35 });
+      }
+      const showBar = u.hp < u.maxHp - 0.5 || sel || fighting;
       if (showBar) {
-        const w = 26 * inv, h = 3.5 * inv, by = y - 50 * (u.hero || u.boss ? 1.1 : 1);
+        const w = 34 * inv, h = 5 * inv, by = y - 54 * (u.hero || u.boss ? 1.1 : 1);
         g.rect(x - w / 2, by, w, h).fill({ color: 0x000000, alpha: 0.65 });
         const r = Math.max(0, u.hp / u.maxHp);
-        g.rect(x - w / 2, by, w * r, h).fill({ color: r > 0.4 ? 0x7be08f : 0xff6b5a });
+        const barColor = u.fam === this.sess.fam ? (r > 0.4 ? 0x7be08f : 0xff6b5a) : u.cop ? 0x7aa8ff : (r > 0.4 ? 0xe8c060 : 0xff6b5a);
+        g.rect(x - w / 2, by, w * r, h).fill({ color: barColor });
+        g.rect(x - w / 2, by, w, h).stroke({ width: 1, color: 0x000000, alpha: 0.8 });
         if (u.fam === this.sess.fam && u.heat > 0) {
           g.rect(x - w / 2, by + h + 1, w, h * 0.7).fill({ color: 0x000000, alpha: 0.6 });
           g.rect(x - w / 2, by + h + 1, (w * u.heat) / 100, h * 0.7).fill({ color: u.heat >= 50 ? 0xff5a5a : 0xd8b25a });

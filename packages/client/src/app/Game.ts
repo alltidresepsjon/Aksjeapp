@@ -69,7 +69,11 @@ export class Game {
       <div id="ticker"><b>HERALD</b><span></span></div>
       <main>
         <div id="view">
-          <div id="toasts"></div>
+          <div id="advisor">
+            <button id="adv-face" title="Messages and rumours">${ADVISOR_SVG}<span class="badge" id="adv-badge"></span></button>
+            <div id="adv-bubble"></div>
+            <div id="adv-log"></div>
+          </div>
           <div id="maptools">
             <button data-tool="all" title="Select whole crew (A)">👥 All</button>
             <button data-tool="box" title="Drag a box to select (or Shift+drag)">⬚ Box</button>
@@ -141,7 +145,8 @@ export class Game {
     if (!hq) return;
     this.cameraPlaced = true;
     const cx = this.sess.map.w / 2, cy = this.sess.map.h / 2;
-    this.renderer.centerOnTile(hq.door.x + (cx - hq.door.x) * 0.25, hq.door.y + (cy - hq.door.y) * 0.25);
+    const pull = innerWidth <= 820 ? 0 : 0.12;
+    this.renderer.centerOnTile(hq.door.x + (cx - hq.door.x) * pull, hq.door.y + (cy - hq.door.y) * pull - 0.5);
     const hero = v.units.find((u) => u.fam === this.sess.fam && u.hero);
     if (hero) this.sel.add(hero.id);
   }
@@ -187,22 +192,53 @@ export class Game {
     else if (e.k === 'death' && visible) audio.death();
     else if (e.k === 'toast' && e.fam === this.sess.fam && !this.toastsSeen.has(e.id)) {
       this.toastsSeen.add(e.id);
-      this.toast(e.text, e.urgent, e.x !== undefined ? { x: e.x, y: e.y! } : undefined);
+      this.toast(e.text, e.urgent, e.x !== undefined ? { x: e.x, y: e.y! } : undefined, true);
     }
   }
-  toast(text: string, urgent = false, at?: { x: number; y: number }) {
-    const box = $('#toasts', this.root);
-    const t = el(`<div class="toast ${urgent ? 'urgent' : ''}">${at ? '<span class="jump">◎</span>' : ''}${esc(text)}</div>`);
-    if (at) t.onclick = () => this.renderer.centerOnTile(at.x, at.y);
-    else t.onclick = () => t.remove();
-    box.prepend(t);
-    while (box.children.length > 4) box.lastElementChild!.remove();
-    if (urgent) audio.alert();
-    setTimeout(() => { t.classList.add('fade'); setTimeout(() => t.remove(), 600); }, urgent ? 7000 : 4500);
+  // ---------- the advisor: Uncle Tommaso tells you the news, one line at a time ----------
+  private messages: { text: string; urgent: boolean; at?: { x: number; y: number }; when: string; read: boolean }[] = [];
+  private bubbleTimer = 0;
+  private logOpen = false;
+  /** Show a message from the advisor. `log` = keep it in the message list (hints and errors are only shown briefly). */
+  toast(text: string, urgent = false, at?: { x: number; y: number }, log = false) {
+    const v = this.sess.view();
+    if (log) {
+      this.messages.unshift({ text, urgent, at, when: `Day ${v.day}, ${clock(v.hour)}`, read: this.logOpen });
+      if (this.messages.length > 60) this.messages.pop();
+    }
+    const bubble = $('#adv-bubble', this.root);
+    bubble.className = 'show' + (urgent ? ' urgent' : '') + (at ? ' jumpable' : '');
+    bubble.innerHTML = `${at ? '<span class="jump">◎</span>' : ''}${esc(text)}`;
+    bubble.onclick = () => { if (at) this.renderer.centerOnTile(at.x, at.y); bubble.className = ''; };
+    clearTimeout(this.bubbleTimer);
+    this.bubbleTimer = window.setTimeout(() => { bubble.className = ''; }, urgent ? 6500 : 4000);
+    const face = $('#adv-face', this.root);
+    face.classList.remove('talk'); void face.offsetWidth; face.classList.add('talk');
+    face.classList.toggle('alarm', urgent);
+    if (urgent) { audio.alert(); setTimeout(() => face.classList.remove('alarm'), 6500); }
+    this.renderLog();
+  }
+  private renderLog() {
+    const unread = this.messages.filter((m) => !m.read).length;
+    const badge = $('#adv-badge', this.root);
+    badge.textContent = unread ? String(Math.min(99, unread)) : '';
+    badge.style.display = unread ? 'inline-block' : 'none';
+    const log = $('#adv-log', this.root);
+    log.classList.toggle('open', this.logOpen);
+    if (!this.logOpen) return;
+    const who = this.sess.isNet ? 'Your consigliere' : 'Uncle Tommaso';
+    log.innerHTML = `<div class="adv-head"><b>${who}</b><span class="mute"> · what I'm hearing</span><button class="x" data-adv="close">×</button></div>
+      ${this.messages.length ? this.messages.map((m, i) => `<div class="adv-msg ${m.urgent ? 'urgent' : ''} ${m.at ? 'jumpable' : ''}" data-adv-i="${i}"><small>${esc(m.when)}</small>${m.at ? '<span class="jump">◎</span>' : ''}${esc(m.text)}</div>`).join('') : '<p class="mute">Nothing yet. Quiet streets make me nervous.</p>'}`;
+  }
+  private toggleLog(open = !this.logOpen) {
+    this.logOpen = open;
+    if (open) for (const m of this.messages) m.read = true;
+    $('#adv-bubble', this.root).className = '';
+    this.renderLog();
   }
   private cmd(c: Command) {
     const err = this.sess.command(c);
-    if (err) this.toast(err);
+    if (err) this.toast(err, false, undefined, false);
     else audio.click();
     this.refresh(true);
     return err;
@@ -376,6 +412,14 @@ export class Game {
       $$('.pane', r).forEach((p) => p.classList.toggle('on', p.id === 'p-' + this.tab));
       $('#side', r).classList.toggle('open', this.sheetOpen);
       this.refresh(true);
+    };
+    $('#adv-face', r).onclick = () => { audio.unlock(); this.toggleLog(); };
+    $('#adv-log', r).onclick = (e) => {
+      const t = e.target as HTMLElement;
+      if (t.closest('[data-adv="close"]')) { this.toggleLog(false); return; }
+      const i = t.closest<HTMLElement>('[data-adv-i]')?.dataset.advI;
+      const m = i !== undefined ? this.messages[+i] : undefined;
+      if (m?.at) { this.renderer.centerOnTile(m.at.x, m.at.y); if (innerWidth <= 820) this.toggleLog(false); }
     };
     const delegate = (e: Event) => this.onUiAction(e);
     $('#side', r).addEventListener('click', delegate);
@@ -701,6 +745,19 @@ export class Game {
     void this.host;
   }
 }
+
+const ADVISOR_SVG = `<svg viewBox="0 0 64 64" aria-hidden="true">
+  <circle cx="32" cy="32" r="31" fill="#2a2216"/>
+  <path d="M10 64c2-14 10-20 22-20s20 6 22 20z" fill="#3a3430"/>
+  <path d="M26 46l6 8 6-8z" fill="#e9e1cc"/><path d="M31 48h2l1 8h-4z" fill="#7a1a1a"/>
+  <ellipse cx="32" cy="33" rx="12" ry="14" fill="#d9a882"/>
+  <path d="M22 38c3 3 7 4 10 2 3 2 7 1 10-2-2 5-6 6-10 4-4 2-8 1-10-4z" fill="#d8d4cc"/>
+  <circle cx="27" cy="31" r="1.6" fill="#2a1a10"/><circle cx="37" cy="31" r="1.6" fill="#2a1a10"/>
+  <path d="M24 27q3-2 6 0M34 27q3-2 6 0" stroke="#bdb8b0" stroke-width="1.6" fill="none"/>
+  <path d="M14 22h36l-3 4H17z" fill="#1d1a18"/><path d="M20 22c0-8 6-12 12-12s12 4 12 12z" fill="#2a2522"/>
+  <rect x="20" y="18" width="24" height="3" fill="#7a5a2a"/>
+  <rect x="40" y="40" width="10" height="2.4" rx="1" fill="#8a5a3a"/><circle cx="50.5" cy="41.2" r="1.4" fill="#ff8a3a"/>
+</svg>`;
 
 export const HELP_HTML = `
 <ul class="help">

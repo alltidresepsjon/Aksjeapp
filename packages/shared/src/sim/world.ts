@@ -1037,7 +1037,7 @@ export class World {
     const unaware = s.time - t.lastHurt > 6 && d > this.detectRange(u) * 0.5 && t.target !== u.id;
     if (u.spec === 'hitman' && unaware) chance = Math.max(chance, 0.9);
     const hit = this.rng.chance(Math.min(0.97, chance));
-    if (u.weapon !== 'tommy' || s.tick % 2 === 0 || hit) this.ev({ k: 'shot', x: up.x, y: up.y, tx: tp.x, ty: tp.y, w: u.weapon, hit, fam: u.fam } as GameEvent);
+    if (u.weapon !== 'tommy' || s.tick % 2 === 0 || hit) this.ev({ k: 'shot', x: up.x, y: up.y, tx: tp.x, ty: tp.y, w: u.weapon, hit, fam: u.fam, t: t.id } as GameEvent);
     if (!u.cop) {
       u.heat = Math.min(MAX_HEAT, u.heat + Math.max(0.25, w.noise * 2.2 * w.cd) * this.heatMult(u));
       if (t.cop) { u.heat = Math.min(MAX_HEAT, u.heat + 3); s.flags['copshot:' + u.fam] = s.time; s.flags['copshotu:' + u.id] = s.time; }

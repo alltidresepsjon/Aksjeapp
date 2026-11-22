@@ -247,7 +247,7 @@ export class App {
     if (m.t === 'lobby' && !this.game) { this.lobbyState = m; if (!m.started) this.lobby(); }
     else if (m.t === 'error' && !this.game) this.turfMenu(m.text);
     else if (m.t === 'start') this.startTurf(m.fam, m.layout, m.startHour);
-    else if (m.t === 'chat' && this.game) this.game.toast(`${m.from}: ${m.text}`);
+    else if (m.t === 'chat' && this.game) this.game.toast(`${m.from}: ${m.text}`, false, undefined, true);
     else if (m.t === 'votes' && this.game && (m.pause.length || m.skip.length)) this.game.toast(`Votes — pause: ${m.pause.length}/${m.need}, skip: ${m.skip.length}/${m.need}`);
   }
   private lobby() {
@@ -271,7 +271,7 @@ export class App {
     if (this.game) return;
     this.hide();
     const sess = new NetSession(this.net!, fam, layout, startHour);
-    sess.onError = (t) => this.game?.toast(t, true);
+    sess.onError = (t) => this.game?.toast(t, false);
     const f = TURF_FAMILIES.find((x) => x.id === fam)!;
     this.game = new Game(this.root, sess, {
       title: 'Turf War', subtitle: `You are the ${f.name}`, quitLabel: 'Leave the match',

@@ -21,7 +21,18 @@ export interface BuildingArt {
   height: number;
 }
 
-const FACADES = [0x8a4b3a, 0x7b5a45, 0xb8a382, 0x9a6b4f, 0x6e7680, 0x8f3f36, 0xa58c6a, 0x5f6b5a];
+const FACADES = [
+  0x8a4b3a, 0x7b5a45, 0xb8a382, 0x9a6b4f, 0x6e7680, 0x8f3f36, 0xa58c6a, 0x5f6b5a,
+  0xc8b48a, 0x4a5a6a, 0x7a8a6a, 0xb07a4a, 0x6a3a3a, 0xd0c4a8, 0x8a6a8a, 0x5a4a3a,
+];
+const LIGHT = new Set([0xb8a382, 0x6e7680, 0xa58c6a, 0xc8b48a, 0xd0c4a8, 0x7a8a6a]);
+const SHUTTERS = [0x2f5a3a, 0x3a4a6a, 0x6a2a2a, 0x2a2a2a, 0x5a6a3a];
+const GHOST_ADS = [
+  ["DR. PELL'S", 'TONIC'], ['HALLORAN', 'GAZETTE'], ['ACE', 'TIRES'], ['KETTLE', 'COFFEE'], ['OLD MILL', 'FLOUR'],
+  ['BLUE RIBBON', 'SOAP'], ['LAKESIDE', 'ICE CO.'], ['SWIFT', 'MOVERS'], ['GOLDEN', 'BISCUITS'], ['NORTHSTAR', 'RADIO'],
+];
+const BILLBOARDS = ['VISIT LAKEVIEW PARK', 'MAPLE ROOT BEER', 'RIDE THE INTERURBAN', 'HALLORAN GAZETTE 2c', 'STERLING HATS', 'COZY THEATRE TONIGHT'];
+type WinStyle = { kind: 'plain' | 'arched' | 'shutters' | 'double'; shutter: number; boxes: boolean };
 const AWNINGS = [0xb23a3a, 0x2f7a4a, 0x2f5a9a, 0xc9a23a, 0x7a3a8a, 0x2a7a7a];
 const NEON = [0xff4fa3, 0x4fd2ff, 0x7dff8a, 0xffb347];
 
@@ -105,14 +116,31 @@ function quad(ctx: Ctx, f: Face, u0: number, u1: number, z0: number, z1: number,
   poly(ctx, [f.at(u0, z0), f.at(u1, z0), f.at(u1, z1), f.at(u0, z1)], fill, stroke);
 }
 
-function windowsOn(ctx: Ctx, lit: Ctx, f: Face, floors: number, startFloor: number, rnd: () => number, frame: number, tall = 1, litChance = 0.55) {
-  const n = Math.max(2, Math.round(f.len * 1.55));
+function windowsOn(ctx: Ctx, lit: Ctx, f: Face, floors: number, startFloor: number, rnd: () => number, frame: number, tall = 1, litChance = 0.55, style: WinStyle = { kind: 'plain', shutter: 0, boxes: false }) {
+  const n = Math.max(2, Math.round(f.len * (style.kind === 'double' ? 1.1 : 1.55)));
   for (let fl = startFloor; fl < floors; fl++) {
     const z0 = 4 + fl * FLOOR_H + 3, z1 = z0 + 11 * tall;
     for (let i = 0; i < n; i++) {
-      const u0 = ((i + 0.22) / n) * f.len, u1 = ((i + 0.78) / n) * f.len;
+      const w = style.kind === 'double' ? 0.36 : 0.28;
+      const u0 = ((i + 0.5 - w) / n) * f.len, u1 = ((i + 0.5 + w) / n) * f.len;
+      if (style.kind === 'arched' && fl > 0) {
+        const arch: [number, number][] = [];
+        for (let k = 0; k <= 8; k++) arch.push(f.at(u0 + ((u1 - u0) * k) / 8, z1 + Math.sin((Math.PI * k) / 8) * 3.5));
+        poly(ctx, [f.at(u0 - 0.03, z0 - 1.5), f.at(u1 + 0.03, z0 - 1.5), ...arch.reverse().map(([x, y]) => [x, y - 1.5] as [number, number])], css(shade(frame, 1.15)));
+        poly(ctx, [f.at(u0, z0), f.at(u1, z0), ...arch.slice().reverse().reverse()], css(0x27313d));
+      }
       quad(ctx, f, u0 - 0.03, u1 + 0.03, z0 - 1.5, z1 + 1.5, css(shade(frame, 1.15)));
       quad(ctx, f, u0, u1, z0, z1, css(0x27313d));
+      if (style.kind === 'double') quad(ctx, f, (u0 + u1) / 2 - 0.015, (u0 + u1) / 2 + 0.015, z0, z1, css(shade(frame, 1.15)));
+      if (style.kind === 'shutters' && fl > 0) {
+        const sw = (u1 - u0) * 0.45;
+        quad(ctx, f, u0 - 0.04 - sw, u0 - 0.04, z0 - 1, z1 + 1, css(style.shutter));
+        quad(ctx, f, u1 + 0.04, u1 + 0.04 + sw, z0 - 1, z1 + 1, css(style.shutter));
+      }
+      if (style.boxes && fl > 0 && rnd() < 0.55) {
+        quad(ctx, f, u0 - 0.02, u1 + 0.02, z0 - 4, z0 - 1.5, css(0x5a3a22));
+        for (let k = 0; k < 4; k++) { const q = f.at(u0 + ((u1 - u0) * (k + 0.5)) / 4, z0 - 1); ctx.fillStyle = css([0xd84a5a, 0xf0d060, 0x6aaa5a, 0xe890b0][(k + i) % 4]); ctx.beginPath(); ctx.arc(q[0], q[1] - 1, 1.3, 0, 7); ctx.fill(); }
+      }
       // sky reflection
       const a = f.at(u0 + (u1 - u0) * 0.15, z1 - 1), b = f.at(u0 + (u1 - u0) * 0.55, z0 + 2);
       ctx.strokeStyle = 'rgba(180,200,220,0.25)';
@@ -155,6 +183,27 @@ function sign(ctx: Ctx, lit: Ctx | null, f: Face, u0: number, u1: number, z0: nu
   }
 }
 
+function ghostSign(ctx: Ctx, f: Face, z0: number, z1: number, lines: string[], bg: number) {
+  quad(ctx, f, 0.12, f.len - 0.12, z0, z1, css(bg, 0.85));
+  const mid = f.at(f.len / 2, (z0 + z1) / 2);
+  const widthPx = Math.abs(f.at(f.len - 0.2, 0)[0] - f.at(0.2, 0)[0]);
+  ctx.save();
+  ctx.translate(mid[0], mid[1]);
+  ctx.transform(1, f.skew, 0, 1, 0, 0);
+  ctx.globalAlpha = 0.62;
+  ctx.fillStyle = '#efe4c8';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const lh = Math.min(16, (z1 - z0) / (lines.length + 0.4));
+  lines.forEach((t, i) => {
+    let size = lh * 0.95;
+    ctx.font = `900 ${size}px "Libre Franklin", sans-serif`;
+    while (ctx.measureText(t).width > widthPx * 0.9 && size > 5) { size -= 0.5; ctx.font = `900 ${size}px "Libre Franklin", sans-serif`; }
+    ctx.fillText(t, 0, (i - (lines.length - 1) / 2) * lh);
+  });
+  ctx.restore();
+}
+
 function awning(ctx: Ctx, f: Face, u0: number, u1: number, z: number, color: number) {
   const stripes = Math.max(3, Math.round((u1 - u0) * 8));
   for (let i = 0; i < stripes; i++) {
@@ -178,7 +227,16 @@ export function buildingArt(b: Building): BuildingArt {
   const floors = Math.max(1, b.floors);
   const steeple = look === 'church' ? 70 : 0;
   const H = floors * FLOOR_H + 6;
-  const top = 70 + steeple;
+  let roofKind: 'flat' | 'gable' | 'mansard' | 'stepped' = 'flat';
+  if (look === 'hotel' || ((look === 'hq' || look === 'shop' || look === 'tenement' || look === 'bank') && b.size === 6 && floors >= 4)) roofKind = 'stepped';
+  else if (look === 'hq') roofKind = 'mansard';
+  else if (look === 'shop' || look === 'tenement') { const r = rnd(); roofKind = r < 0.3 ? 'gable' : r < 0.45 ? 'mansard' : 'flat'; }
+  const ridgeX = rnd() < 0.5;
+  const towerFloors = roofKind === 'stepped' ? 2 + Math.floor(rnd() * 3) : 0;
+  const roofH = roofKind === 'stepped' ? towerFloors * FLOOR_H + 36 : roofKind === "gable" ? s * 9 + 4 : roofKind === 'mansard' ? 16 : 0;
+  const win: WinStyle = { kind: (['plain', 'arched', 'shutters', 'double'] as const)[Math.floor(rnd() * 4)], shutter: SHUTTERS[Math.floor(rnd() * SHUTTERS.length)], boxes: rnd() < 0.35 };
+  if (look !== 'shop' && look !== 'tenement' && look !== 'hq') win.kind = look === 'hotel' || look === 'bank' || look === 'civic' ? 'arched' : 'plain';
+  const top = 70 + steeple + roofH;
   const W = s * 64 + 30;
   const Hc = s * 32 + H + top + 8;
   const ox = s * 32 + 15, oy = H + top;
@@ -194,7 +252,7 @@ export function buildingArt(b: Building): BuildingArt {
   const otherFace = doorFace === east ? south : east;
 
   let base = FACADES[b.style % FACADES.length];
-  let material: 'brick' | 'stone' | 'metal' | 'wood' = base === 0xb8a382 || base === 0x6e7680 || base === 0xa58c6a ? 'stone' : 'brick';
+  let material: 'brick' | 'stone' | 'metal' | 'wood' = LIGHT.has(base) ? 'stone' : 'brick';
   let roof = 0x3b3836;
   let trim = shade(base, 1.25);
   if (look === 'hq') { base = 0x6b2f2a; trim = 0xc9a65a; material = 'brick'; }
@@ -251,8 +309,21 @@ export function buildingArt(b: Building): BuildingArt {
     sign(ctx, lit, f, 0.05, bodyS - 0.05, 15, 22, b.name.toUpperCase(), 0x2a2016, '#e8d8a8', 0xffd27a);
     quad(lit, f, bodyS * 0.38, bodyS * 0.62, 4, 12, css(0xffc060, 0.7));
   } else {
-    windowsOn(ctx, lit, otherFace, floors, look === 'warehouse' || look === 'garage' ? floors : 1, rnd, frame, look === 'hotel' ? 0.9 : 1);
-    windowsOn(ctx, lit, doorFace, floors, 1, rnd, frame, look === 'hotel' ? 0.9 : 1);
+    const ghost = (look === 'shop' || look === 'tenement' || look === 'warehouse') && floors >= 3 && rnd() < 0.4 ? GHOST_ADS[Math.floor(rnd() * GHOST_ADS.length)] : null;
+    windowsOn(ctx, lit, otherFace, ghost ? Math.min(floors, 2) : floors, look === 'warehouse' || look === 'garage' ? floors : 1, rnd, frame, look === 'hotel' ? 0.9 : 1, 0.55, win);
+    windowsOn(ctx, lit, doorFace, floors, 1, rnd, frame, look === 'hotel' ? 0.9 : 1, 0.55, win);
+    if (ghost) ghostSign(ctx, otherFace, 2 * FLOOR_H + 6, H - 7, ghost, shade(base, 0.7));
+    // corner stones
+    if (look === 'shop' || look === 'tenement' || look === 'hq' || look === 'hotel' || look === 'bank' || look === 'civic') {
+      for (const f of [south, east]) {
+        const dark = f === east ? 0.75 : 1;
+        for (let z = 3; z < H - 4; z += 6) {
+          const wide = (z / 6) % 2 < 1 ? 0.14 : 0.09;
+          quad(ctx, f, f.len - wide, f.len, z, z + 5, css(shade(trim, 0.95 * dark)));
+          if (f === south) quad(ctx, f, 0, wide, z, z + 5, css(shade(trim, 0.95)));
+        }
+      }
+    }
     if (look !== 'warehouse' && look !== 'garage') windowsOn(ctx, lit, otherFace, 1, 0, rnd, frame, 1, 0.4);
     const f = doorFace;
     const L = f.len;
@@ -338,7 +409,73 @@ export function buildingArt(b: Building): BuildingArt {
   }
 
   // ---- roof details ----
-  if (look !== 'pier') {
+  let flagZ = H;
+  if (roofKind === 'gable') {
+    flagZ = H + roofH;
+    const tile = rnd() < 0.5 ? 0x5a3a32 : rnd() < 0.5 ? 0x3a4048 : 0x4a6a5a;
+    const rh = roofH;
+    if (ridgeX) {
+      poly(ctx, [P(0, 0, H), P(s, 0, H), P(s, s / 2, H + rh), P(0, s / 2, H + rh)], css(shade(tile, 0.7)));
+      const southPlane: [number, number][] = [P(0, s, H), P(s, s, H), P(s, s / 2, H + rh), P(0, s / 2, H + rh)];
+      poly(ctx, southPlane, css(tile));
+      for (let k = 1; k < 6; k++) { const t = k / 6; const a = P(0, s - (s / 2) * t, H + rh * t), c = P(s, s - (s / 2) * t, H + rh * t); ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); ctx.stroke(); }
+      poly(ctx, [P(s, 0, H), P(s, s, H), P(s, s / 2, H + rh)], css(shade(base, 0.68)));
+      const wnd = P(s, s / 2, H + rh * 0.35);
+      ctx.fillStyle = css(0x27313d); ctx.fillRect(wnd[0] - 3, wnd[1] - 4, 6, 7);
+      if (rnd() < 0.6) lit.fillStyle = css(0xffd27a, 0.9), lit.fillRect(wnd[0] - 3, wnd[1] - 4, 6, 7);
+      box(ctx, P, s * 0.3, s / 2 - 0.1, H + rh * 0.7, 0.2, 0.2, 12, 0x2a2624, shade(0x8a4b3a, 0.9), shade(0x8a4b3a, 0.65));
+    } else {
+      poly(ctx, [P(0, 0, H), P(0, s, H), P(s / 2, s, H + rh), P(s / 2, 0, H + rh)], css(shade(tile, 0.85)));
+      poly(ctx, [P(s, 0, H), P(s, s, H), P(s / 2, s, H + rh), P(s / 2, 0, H + rh)], css(shade(tile, 0.7)));
+      for (let k = 1; k < 6; k++) { const t = k / 6; const a = P(s - (s / 2) * t, 0, H + rh * t), c = P(s - (s / 2) * t, s, H + rh * t); ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); ctx.stroke(); }
+      poly(ctx, [P(0, s, H), P(s, s, H), P(s / 2, s, H + rh)], css(shade(base, 0.92)));
+      const wnd = P(s / 2, s, H + rh * 0.35);
+      ctx.fillStyle = css(0x27313d); ctx.fillRect(wnd[0] - 3, wnd[1] - 4, 6, 7);
+      if (rnd() < 0.6) lit.fillStyle = css(0xffd27a, 0.9), lit.fillRect(wnd[0] - 3, wnd[1] - 4, 6, 7);
+      box(ctx, P, s / 2 - 0.1, s * 0.3, H + rh * 0.7, 0.2, 0.2, 12, 0x2a2624, shade(0x8a4b3a, 0.9), shade(0x8a4b3a, 0.65));
+    }
+  } else if (roofKind === 'mansard') {
+    const m = 0.32, mh = roofH;
+    const slate = 0x3a4048;
+    flagZ = H + mh;
+    poly(ctx, [P(0, s, H), P(s, s, H), P(s - m, s - m, H + mh), P(m, s - m, H + mh)], css(slate));
+    poly(ctx, [P(s, 0, H), P(s, s, H), P(s - m, s - m, H + mh), P(s - m, m, H + mh)], css(shade(slate, 0.75)));
+    poly(ctx, [P(m, m, H + mh), P(s - m, m, H + mh), P(s - m, s - m, H + mh), P(m, s - m, H + mh)], css(roof));
+    // dormers
+    const nd = Math.max(1, Math.round(s * 0.9));
+    for (let i = 0; i < nd; i++) {
+      const u = ((i + 0.5) / nd) * s;
+      box(ctx, P, u - 0.12, s - m - 0.05, H + 3, 0.24, 0.2, 9, shade(slate, 1.2), shade(trim, 0.9), shade(trim, 0.7), false);
+      const wp = P(u, s - m + 0.15, H + 7);
+      ctx.fillStyle = css(0x27313d); ctx.fillRect(wp[0] - 2.5, wp[1] - 3, 5, 5);
+      if (rnd() < 0.55) { lit.fillStyle = css(0xffd27a, 0.95); lit.fillRect(wp[0] - 2.5, wp[1] - 3, 5, 5); }
+      const v = ((i + 0.5) / nd) * s;
+      box(ctx, P, s - m - 0.05, s - v - 0.12, H + 3, 0.2, 0.24, 9, shade(slate, 1.2), shade(trim, 0.9), shade(trim, 0.7), false);
+    }
+    box(ctx, P, s * 0.6, s * 0.3, H + mh, 0.22, 0.22, 10, 0x2a2624, shade(0x8a4b3a, 0.9), shade(0x8a4b3a, 0.65));
+  } else if (roofKind === 'stepped') {
+    // art-deco setback: a narrower tower rises from the roof
+    const inset = s * 0.22, ts = s - inset * 2;
+    const tz = H, th = towerFloors * FLOOR_H + 6;
+    poly(ctx, [P(0, 0, H), P(s, 0, H), P(s, s, H), P(0, s, H)], css(roof));
+    const tl = shade(base, 1.05), tr = shade(base, 0.75);
+    box(ctx, P, inset, inset, tz, ts, ts, th, roof, tl, tr);
+    const ts1: Face = { at: (u, z) => P(inset + u, inset + ts, tz + z), len: ts, skew: 0.5, out: (u, z, d) => P(inset + u, inset + ts + d, tz + z) };
+    const te1: Face = { at: (u, z) => P(inset + ts, inset + ts - u, tz + z), len: ts, skew: -0.5, out: (u, z, d) => P(inset + ts + d, inset + ts - u, tz + z) };
+    windowsOn(ctx, lit, ts1, towerFloors, 0, rnd, frame, 1, 0.6, win);
+    windowsOn(ctx, lit, te1, towerFloors, 0, rnd, frame, 1, 0.6, win);
+    for (const f of [ts1, te1]) quad(ctx, f, 0, f.len, th - 4, th, css(shade(trim, f === ts1 ? 1 : 0.75)));
+    // stepped crown
+    const c2 = inset + ts * 0.2, cs = ts * 0.6;
+    box(ctx, P, c2, c2, tz + th, cs, cs, 12, shade(roof, 1.1), shade(trim, 1), shade(trim, 0.75));
+    const tip = P(s / 2, s / 2, tz + th + 34);
+    const base2 = P(s / 2, s / 2, tz + th + 12);
+    ctx.strokeStyle = css(0xd8c070); ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(base2[0], base2[1]); ctx.lineTo(tip[0], tip[1]); ctx.stroke();
+    lit.fillStyle = 'rgba(255,60,60,0.95)'; lit.beginPath(); lit.arc(tip[0], tip[1], 2.5, 0, 7); lit.fill();
+    ctx.fillStyle = '#a02020'; ctx.beginPath(); ctx.arc(tip[0], tip[1], 1.6, 0, 7); ctx.fill();
+    flagZ = tz + th + 12;
+  }
+  if (look !== 'pier' && roofKind === 'flat') {
     // parapet
     const pz = H;
     ctx.strokeStyle = css(shade(trim, 0.8));
@@ -359,6 +496,25 @@ export function buildingArt(b: Building): BuildingArt {
     for (let i = 0; i < chimneys; i++) {
       const x = 0.2 + rnd() * (s - 0.6), y = 0.15 + rnd() * 0.5;
       box(ctx, P, x, y, pz, 0.22, 0.22, 10 + rnd() * 6, 0x2a2624, shade(0x8a4b3a, 0.9), shade(0x8a4b3a, 0.65));
+    }
+    if (look !== 'warehouse' && look !== 'diner' && look !== 'church') {
+      // stair hut and skylights
+      if (rnd() < 0.6) box(ctx, P, s * 0.62, s * 0.55, pz, 0.45, 0.35, 11, shade(roof, 1.2), shade(base, 0.85), shade(base, 0.62));
+      if (rnd() < 0.5) for (let k = 0; k < 2; k++) { const x = 0.3 + k * 0.5, y = s - 0.7; poly(ctx, [P(x, y, pz + 1), P(x + 0.3, y, pz + 1), P(x + 0.3, y + 0.25, pz + 1), P(x, y + 0.25, pz + 1)], css(0x8aa0b0, 0.9)); }
+    }
+    if (rnd() < 0.2 && floors <= 4 && look !== 'church' && look !== 'precinct' && look !== 'bank' && look !== 'civic') {
+      // rooftop billboard facing the street
+      const x0 = s * 0.12, x1 = s * 0.88, y = s * 0.45, z0 = pz + 9, z1 = pz + 30;
+      ctx.strokeStyle = '#2a2420'; ctx.lineWidth = 1.5;
+      for (const x of [x0 + 0.1, (x0 + x1) / 2, x1 - 0.1]) { const a = P(x, y, pz), c = P(x, y, z0); ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(c[0], c[1]); ctx.stroke(); }
+      const bf: Face = { at: (u, z) => P(x0 + u, y, z), len: x1 - x0, skew: 0.5, out: (u, z, d) => P(x0 + u, y + d, z) };
+      const colors = [0xe9dcc0, 0xc23a2a, 0x2f5a8a, 0xd8b25a];
+      const bg = colors[Math.floor(rnd() * colors.length)];
+      quad(ctx, bf, 0, bf.len, z0, z1, css(bg), 'rgba(0,0,0,0.6)');
+      const txt = BILLBOARDS[Math.floor(rnd() * BILLBOARDS.length)];
+      sign(ctx, null, bf, 0.08, bf.len - 0.08, z0 + 4, z1 - 4, txt, bg, bg === 0xe9dcc0 || bg === 0xd8b25a ? '#2a2016' : '#f5ecd8');
+      // little lamps light it at night
+      for (const u of [0.2, bf.len / 2, bf.len - 0.2]) { const q = bf.at(u, z1 + 1); lit.fillStyle = 'rgba(255,230,160,0.55)'; lit.beginPath(); lit.ellipse(q[0], q[1] + 8, 9, 7, 0, 0, 7); lit.fill(); }
     }
     if (floors >= 4 && look !== 'church') {
       // water tower
@@ -404,7 +560,7 @@ export function buildingArt(b: Building): BuildingArt {
       for (const f of [south, east]) for (let u = 0.3; u < f.len; u += 0.6) { const p = f.at(u, H + 2); ctx.fillStyle = css(trim); ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, 7); ctx.fill(); }
     }
   }
-  const flagP = P(s * 0.75, s * 0.25, H);
+  const flagP = roofKind === 'gable' ? P(ridgeX ? s * 0.8 : s / 2, ridgeX ? s / 2 : s * 0.2, flagZ) : roofKind === 'stepped' ? P(s * 0.85, s * 0.15, H) : P(s * 0.75, s * 0.25, flagZ);
   return { day: cv, lit: lcv, ox, oy, w: W, h: Hc, flag: { x: flagP[0] - ox, y: flagP[1] - oy }, height: H };
 }
 
