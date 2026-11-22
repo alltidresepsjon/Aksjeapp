@@ -2,7 +2,7 @@
 // and the rest of the city fading into the dark on the north and west. Purely decorative.
 
 import { Container, Graphics, Sprite, Texture } from 'pixi.js';
-import { PERIOD, ROAD, BLOCK, type MapData } from '@bg/shared';
+import { PERIOD, ROAD, BLOCK, edgeSites, type MapData } from '@bg/shared';
 import { artRng, canvas, css, shade, toScreen } from './iso';
 import { SPRITE_RES } from './tex/sprites';
 
@@ -19,6 +19,8 @@ export interface Outskirts {
   night: Graphics;
   objects: { sprite: Sprite; depth: number; lit?: Sprite }[];
   steam: { x: number; y: number }[];
+  /** The smugglers' boat at the landing, shown on nights it has tied up. */
+  boat: { sprite: Sprite; lit: Sprite; depth: number } | null;
 }
 
 export function buildOutskirts(map: MapData): Outskirts {
@@ -69,13 +71,30 @@ export function buildOutskirts(map: MapData): Outskirts {
   { const a = toScreen(-SEA, h + 2.25), b = toScreen(w + 2.25, h + 2.25), c = toScreen(w + 2.25, -SEA); g.moveTo(a.x, a.y - 7).lineTo(b.x, b.y - 7).lineTo(c.x, c.y - 7).stroke({ width: 1.6, color: 0xe0d6c0, alpha: 0.9 }); }
 
   // ---- the amusement pier with a Ferris wheel (south-east) ----
-  const px = Math.max(4, w - 9), py0 = h + 2.3, py1 = h + 14;
+  const sites = edgeSites(map);
+  const objects: Outskirts['objects'] = [];
+  let boat: Outskirts['boat'] = null;
+  if (sites.landing) {
+    // a plain wooden jetty and, some nights, a rum-runner's motorboat
+    const lx = sites.landing.x + 0.75, ly0 = h + 2.3, ly1 = h + 9;
+    quad(g, [lx, ly0], [lx + 1.5, ly0], [lx + 1.5, ly1], [lx, ly1]); g.fill({ color: 0x6e5236 });
+    for (let y = ly0; y < ly1; y += 0.33) { const a = toScreen(lx, y), b = toScreen(lx + 1.5, y); g.moveTo(a.x, a.y).lineTo(b.x, b.y); }
+    g.stroke({ width: 1, color: 0x3a2a1a, alpha: 0.5 });
+    for (let y = ly0 + 0.6; y < ly1; y += 1.4) for (const x of [lx, lx + 1.5]) { const p = toScreen(x, y); g.moveTo(p.x, p.y).lineTo(p.x, p.y + 9); }
+    g.stroke({ width: 2, color: 0x2e2216, alpha: 0.9 });
+    const art = motorboat();
+    const bp = toScreen(lx + 2.6, ly1 - 1.5);
+    const bs = new Sprite(Texture.from(art.day)); bs.anchor.set(0.5, 0.75); bs.scale.set(1 / SPRITE_RES); bs.position.set(bp.x, bp.y);
+    const bl = new Sprite(Texture.from(art.lit)); bl.anchor.set(0.5, 0.75); bl.scale.set(1 / SPRITE_RES); bl.position.set(bp.x, bp.y); bl.blendMode = 'add';
+    boat = { sprite: bs, lit: bl, depth: lx + ly1 + 40 };
+  }
+  const px = sites.amusement ? sites.amusement.x : Math.max(4, w - 9), py0 = h + 2.3, py1 = h + 14;
+  if (sites.amusement) {
   quad(g, [px, py0], [px + 3, py0], [px + 3, py1], [px, py1]); g.fill({ color: 0x7a5c3c });
   for (let y = py0; y < py1; y += 0.33) { const a = toScreen(px, y), b = toScreen(px + 3, y); g.moveTo(a.x, a.y).lineTo(b.x, b.y); }
   g.stroke({ width: 1, color: 0x4a3420, alpha: 0.5 });
   for (let y = py0 + 0.5; y < py1; y += 1.5) for (const x of [px, px + 3]) { const p = toScreen(x, y); g.moveTo(p.x, p.y).lineTo(p.x, p.y + 10); }
   g.stroke({ width: 2, color: 0x3a2a1a, alpha: 0.9 });
-  const objects: Outskirts['objects'] = [];
   const wheel = ferrisWheel();
   const wp = toScreen(px + 1.5, py1 - 2);
   const ws = new Sprite(Texture.from(wheel.day)); ws.anchor.set(0.5, 1); ws.scale.set(1 / SPRITE_RES); ws.position.set(wp.x, wp.y);
@@ -86,6 +105,7 @@ export function buildOutskirts(map: MapData): Outskirts {
   const ps = new Sprite(Texture.from(pav.day)); ps.anchor.set(0.5, 1); ps.scale.set(1 / SPRITE_RES); ps.position.set(pp.x, pp.y);
   const pl = new Sprite(Texture.from(pav.lit)); pl.anchor.set(0.5, 1); pl.scale.set(1 / SPRITE_RES); pl.position.set(pp.x, pp.y); pl.blendMode = 'add';
   objects.push({ sprite: ps, depth: px + py0 + 5 + 50, lit: pl });
+  }
 
   // ---- the rest of the city to the north and west, fading into the dark ----
   const city = new Graphics();
@@ -145,7 +165,24 @@ export function buildOutskirts(map: MapData): Outskirts {
     const x = Math.floor(rnd() * w), y = Math.floor(rnd() * h);
     if (map.tiles[y * w + x] === 0) steam.push({ x: x + 0.5, y: y + 0.5 });
   }
-  return { back, night, objects, steam };
+  return { back, night, objects, steam, boat };
+}
+
+function motorboat() {
+  const W = 150, H = 80;
+  const [day, c] = canvas(W * SPRITE_RES, H * SPRITE_RES);
+  const [lit, l] = canvas(W * SPRITE_RES, H * SPRITE_RES);
+  c.scale(SPRITE_RES, SPRITE_RES); l.scale(SPRITE_RES, SPRITE_RES);
+  // a long mahogany rum-runner seen from the south-east, bow pointing up-right
+  c.fillStyle = 'rgba(200,230,240,0.35)'; c.beginPath(); c.ellipse(70, 60, 62, 12, -0.45, 0, 7); c.fill();
+  c.fillStyle = '#5a2e1a'; c.beginPath(); c.moveTo(20, 66); c.lineTo(128, 18); c.lineTo(136, 24); c.lineTo(40, 74); c.closePath(); c.fill();
+  c.fillStyle = '#7a4226'; c.beginPath(); c.moveTo(20, 58); c.lineTo(128, 10); c.lineTo(136, 24); c.lineTo(20, 66); c.closePath(); c.fill();
+  c.fillStyle = '#e8e0cc'; c.fillRect(60, 30, 22, 10);
+  for (let i = 0; i < 5; i++) { c.fillStyle = '#8a6a3a'; c.fillRect(30 + i * 9, 50 - i * 4, 8, 7); c.strokeStyle = '#3a2a1a'; c.strokeRect(30 + i * 9, 50 - i * 4, 8, 7); }
+  c.fillStyle = '#1a1a1a'; c.fillRect(92, 22, 3, 14);
+  l.fillStyle = 'rgba(255,210,120,0.95)'; l.beginPath(); l.arc(93.5, 20, 3, 0, 7); l.fill();
+  l.fillStyle = 'rgba(255,210,120,0.25)'; l.beginPath(); l.arc(93.5, 22, 14, 0, 7); l.fill();
+  return { day, lit };
 }
 
 function ferrisWheel() {

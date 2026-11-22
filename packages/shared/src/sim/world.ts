@@ -4,11 +4,11 @@ import {
   BUILDING_SIGHT, COP_SPEED, DT, HEAT_WANTED, HOUR, MAX_HEAT, NIGHT_SIGHT, SIGHT, WALK_SPEED,
   isNight, isOpen, PERIOD,
 } from '../constants';
-import { BTYPES, OFFICIALS, RACKETS, shopName } from '../data/buildings';
+import { BTYPES, OFFICIALS, RACKETS, repLevel, shopName } from '../data/buildings';
 import { PROPRIETORS, WEATHER, FIRST, LAST } from '../data/names';
 import { VEHICLES } from '../data/vehicles';
 import { WEAPONS } from '../data/weapons';
-import { generateMap, type Layout, type MapData } from '../map/mapgen';
+import { edgeSites, generateMap, type Layout, type MapData } from '../map/mapgen';
 import { PathFinder } from '../map/pathfind';
 import { Rng } from '../rng';
 import type {
@@ -91,6 +91,18 @@ export class World {
         style: rng.int(0, 7), seed: rng.int(1, 1e9), alarm: 0,
       };
     });
+    // the sea front: a pleasure pier you can buy or take, and a landing where smugglers' boats tie up
+    const sites = edgeSites(this.map);
+    const addEdge = (type: 'amusement' | 'landing', site: NonNullable<typeof sites.amusement>, name: string) => {
+      const def = BTYPES[type];
+      buildings.push({
+        id: buildings.length, type, name, x: site.x, y: site.y, size: site.size, floors: 1, door: site.door, side: 'S',
+        street: 'The Boardwalk', owner: null, prog: {}, manager: null, candidates: [], racket: null, shut: 0, stock: 0,
+        burned: false, fire: 0, safe: 0, cracked: false, tag: type, hqOf: null, price: def.price, style: 0, seed: rng.int(1, 1e9), alarm: 0,
+      });
+    };
+    if (sites.amusement) addEdge('amusement', sites.amusement, 'Halloran Pleasure Pier');
+    if (sites.landing) addEdge('landing', sites.landing, 'Boardwalk Landing');
     const used = new Set<string>();
     for (const b of buildings) {
       let n = b.name;
@@ -108,7 +120,7 @@ export class World {
         money: f.human ? f.money : Math.round(f.money * D.aiMoney), hq: hq ? hq.id : -1, eliminated: false, payroll: { precinct: 0, hall: 0, judge: 0 },
         reveal: 0, robbed: 0, delivered: 0, aggression: f.human ? f.aggression : Math.min(0.95, f.aggression * D.aiAggr),
         cap: f.human ? f.cap : Math.max(2, f.cap + D.aiCap), statLo: f.statLo, statHi: f.statHi,
-        nextAi: 2 + Object.keys(families).length * 0.7, edge: !!f.edge || !hq, income: 0,
+        nextAi: 2 + Object.keys(families).length * 0.7, edge: !!f.edge || !hq, income: 0, rep: 0,
       };
     }
     this.s = {
@@ -117,7 +129,7 @@ export class World {
       news: [], ads: [], events: [], evId: 1,
       objectives: init.objectives.map((o): Objective => ({ id: o.id, text: o.text, def: o.def, optional: !!o.optional, after: o.after ?? '', done: false, failed: false, progress: '' })),
       script: init.script.map((t) => ({ ...t, fired: false })),
-      flags: {}, nextId: 1, copTimer: 0, result: null, fog: init.fog, timeLimitDay: init.timeLimitDay ?? 0, interrupt: 0,
+      flags: {}, nextId: 1, copTimer: 0, result: null, fog: init.fog, timeLimitDay: init.timeLimitDay ?? 0, interrupt: 0, rain: 0,
     };
     for (const b of buildings) this.refreshCandidates(b);
     const human = init.families.find((f) => f.human);
@@ -335,6 +347,8 @@ export class World {
     if (h === 0) this.news(`Midnight on ${this.map.streetsH[0]}. ${this.rng.pick(['The speakeasies are full.', 'Gin flows like the harbor tide.', 'A saxophone wails somewhere.'])}`);
     if (h === 6) this.morning();
     if (h === 23) this.raids();
+    this.weatherHour(h);
+    this.boatHour(h);
   }
 
   morning() {
@@ -345,6 +359,24 @@ export class World {
       for (const u of s.units) if (u.fam === f.id && this.active(u)) wages += u.wage;
       for (const b of s.buildings) if (b.owner === f.id && b.manager) wages += b.manager.wage;
       f.money -= wages;
+      // clean businesses earn goodwill, rackets cost a little; everything drifts slowly back to neutral
+      const owned = s.buildings.filter((b) => b.owner === f.id && !b.burned);
+      const clean = owned.filter((b) => !b.racket && BTYPES[b.type].business && b.type !== 'hq').length;
+      const pierClean = owned.some((b) => b.type === 'amusement' && !b.racket) ? 4 : 0;
+      const pierDirty = owned.some((b) => b.type === 'amusement' && b.racket) ? -2 : 0;
+      this.repChange(f.id, Math.min(6, clean * 0.5) + pierClean + pierDirty - owned.filter((b) => b.racket).length * 0.3 - f.rep * 0.03);
+      if (f.human && f.rep >= 40 && this.rng.chance(0.4)) {
+        f.reveal = Math.max(f.reveal, s.time + HOUR * 4);
+        this.toast(f.id, 'A grateful shopkeeper whispers where the rival crews are this morning. They are on your map for a few hours.');
+      } else if (f.human && f.rep <= -40 && this.rng.chance(0.4)) {
+        const crew = s.units.filter((u) => u.fam === f.id && (u.loc === 'street' || u.loc === 'inside') && !u.hero);
+        const snitched = crew.length ? this.rng.pick(crew) : null;
+        if (snitched) {
+          snitched.heat = Math.min(MAX_HEAT, snitched.heat + 30);
+          this.toast(f.id, `Someone on the street has been talking to the police about ${snitched.name}.`, undefined, true);
+          this.news(`Anonymous tip leads police to "a known associate" of the ${f.short}s`, false, f.id);
+        }
+      }
       f.payroll.precinct = Math.max(0, f.payroll.precinct - 1);
       f.payroll.hall = Math.max(0, f.payroll.hall - 1);
       f.payroll.judge = Math.max(0, f.payroll.judge - 1);
@@ -370,7 +402,7 @@ export class World {
       if (!f || f.payroll.precinct > 0) continue;
       const crew = s.units.filter((u) => u.fam === f.id && this.active(u));
       const avgHeat = crew.length ? crew.reduce((a, u) => a + u.heat, 0) / crew.length : 0;
-      const p = 0.05 + avgHeat / 260 - (f.payroll.hall > 0 ? 0.04 : 0);
+      const p = Math.max(0.01, 0.05 + avgHeat / 260 - (f.payroll.hall > 0 ? 0.04 : 0) - f.rep / 500);
       if (!this.rng.chance(p)) continue;
       const guards = s.units.filter((u) => u.fam === f.id && u.loc === 'inside' && u.bld === b.id);
       if (guards.length && this.rng.chance(0.5)) {
@@ -382,6 +414,49 @@ export class World {
       this.ev({ k: 'siren', x: b.door.x, y: b.door.y } as GameEvent);
       this.news(`DRY RAID! Police smash a ${RACKETS[b.racket].name.toLowerCase()} behind ${b.name} on ${b.street}`, true, f.id);
       if (f.human) this.toast(f.id, `Police raided your ${RACKETS[b.racket].name} at ${b.name}. Closed for 2 days.`, b.door, true);
+    }
+  }
+
+  /** Rain sets in for a stretch of the day on some days. */
+  weatherHour(h: number) {
+    const s = this.s;
+    if (h === 6) {
+      const rainy = this.rng.chance(0.3);
+      s.flags.rainFrom = rainy ? this.rng.int(10, 18) : -1;
+      s.flags.rainTo = rainy ? Math.min(30, (s.flags.rainFrom as number) + this.rng.int(4, 9)) : -1;
+    }
+    const from = s.flags.rainFrom ?? -1, to = s.flags.rainTo ?? -1;
+    const hh = h < 6 ? h + 24 : h;
+    const was = s.rain;
+    s.rain = from >= 0 && hh >= from && hh < to ? 1 : 0;
+    if (s.rain && !was) {
+      this.news(this.rng.pick(['Rain sweeps in off the ocean; boardwalk empties', 'Downpour over Port Halloran', 'Squall hits the harbor']), false);
+      for (const f of Object.values(s.families)) if (f.human) this.toast(f.id, 'Rain coming in. Fewer eyes on the street and less heat for anything you do, but nobody sees far and aim suffers.');
+    }
+  }
+  /** Some nights a smugglers' boat ties up at the landing with crates to sell. */
+  boatHour(h: number) {
+    const b = this.s.buildings.find((x) => x.type === 'landing');
+    if (!b) return;
+    if (h === 21 && this.rng.chance(0.55)) {
+      b.stock = this.rng.int(8, 16);
+      this.s.flags.boat = 1;
+      for (const f of Object.values(this.s.families)) if (f.human) this.toast(f.id, `A rum-runner's boat has tied up at the Boardwalk Landing with ${b.stock} crates. Send a car before 03:00.`, b.door);
+    }
+    if (h === 3 && b.stock > 0) { b.stock = 0; this.s.flags.boat = 0; }
+    if (h === 3) this.s.flags.boat = 0;
+  }
+  /** Standing with the public; crosses of the big thresholds make the papers. */
+  repChange(fam: FamId, delta: number) {
+    const f = this.s.families[fam];
+    if (!f || !delta) return;
+    const before = repLevel(f.rep).name;
+    f.rep = Math.max(-100, Math.min(100, f.rep + delta));
+    const after = repLevel(f.rep).name;
+    if (before !== after && f.human) {
+      const up = delta > 0;
+      this.news(up ? `The ${f.short}s "a credit to the neighbourhood", says shopkeeper` : `Neighbours grow afraid of the ${f.short} crew`, false, fam);
+      this.toast(fam, `Your standing with the public is now: ${after}.`, undefined, !up);
     }
   }
 
@@ -611,6 +686,11 @@ export class World {
         if (b.type !== 'precinct') return 'Go to the police precinct.';
         if (!this.s.units.some((x) => x.fam === u.fam && x.loc === 'jail')) return 'Nobody of ours is in jail.';
         return null;
+      case 'donate':
+        if (b.type !== 'church') return 'Donations go to the church.';
+        if ((this.s.flags['donated:' + u.fam] ?? -1) === this.s.day) return 'Father Brennan thanks you, but once a day is plenty.';
+        if (fam.money < 250) return 'A proper donation is $250.';
+        return null;
       case 'arm': {
         if (b.type !== 'pawn') return 'Guns are sold at the pawn shop.';
         if (b.owner && b.owner !== u.fam) return 'The rivals own this shop.';
@@ -653,6 +733,7 @@ export class World {
         const p = this.buyPrice(b, u.fam);
         f.money -= p;
         b.burned = false; b.fire = 0;
+        this.repChange(u.fam, b.type === 'amusement' ? 10 : 3);
         this.capture(b, u.fam, [u]);
         this.news(`${b.name} on ${b.street} changes hands; buyer "a respectable family"`, false, u.fam);
         u.order = { k: 'idle' };
@@ -677,6 +758,15 @@ export class World {
         u.order = { k: 'idle' };
         return;
       }
+      case 'donate': {
+        f.money -= 250;
+        this.s.flags['donated:' + u.fam] = this.s.day;
+        this.repChange(u.fam, 12);
+        this.news(`Anonymous gift of $250 for the parish soup kitchen on ${b.street}`, false, u.fam);
+        this.toast(u.fam, 'Father Brennan blesses your generosity. The neighbourhood will hear of it.', b.door);
+        u.order = { k: 'idle' };
+        return;
+      }
       case 'arm': {
         const w = (arg as WeaponId) ?? 'revolver';
         f.money -= this.gunPrice(b, u.fam, w);
@@ -688,7 +778,7 @@ export class World {
       case 'extort': case 'takeover': {
         const defenders = this.defenders(b);
         if (defenders.length) { u.task = null; return; } // fight continues via combat
-        const rate = act === 'extort' ? 3 + u.stats.charm * 2.3 : (2.5 + u.stats.muscle * 1.7) * (b.type === 'hq' ? 0.3 : 1);
+        const rate = (act === 'extort' ? (3 + u.stats.charm * 2.3) * (1 + Math.max(-60, Math.min(100, f.rep)) / 200) : (2.5 + u.stats.muscle * 1.7) * (b.type === 'hq' ? 0.3 : 1));
         b.prog[u.fam] = (b.prog[u.fam] ?? 0) + rate * DT * (f.human ? 1 : 0.7);
         u.task = { k: act, t: b.prog[u.fam], total: 100, b: b.id };
         this.s.flags['work:' + b.id + ':' + u.fam] = s.time;
@@ -700,6 +790,7 @@ export class World {
         if (b.prog[u.fam] >= 100) {
           const workers = s.units.filter((x) => x.fam === u.fam && x.loc === 'street' && x.order.k === 'goto' && x.order.b === b.id && dist(x, b.door) < 1.2);
           for (const w of workers) w.heat = Math.min(MAX_HEAT, w.heat + (act === 'extort' ? 3 : 12) * this.heatMult(w));
+          this.repChange(u.fam, act === 'extort' ? -1 : b.type === 'amusement' ? -6 : -3);
           this.capture(b, u.fam, workers);
         }
         return;
@@ -721,7 +812,7 @@ export class World {
           if (act === 'crack') {
             const amount = Math.round(b.safe);
             f.money += amount;
-            if (b.type === 'bank') { f.robbed += amount; this.news(`VAULT EMPTIED AT ${b.name.toUpperCase()}: $${amount.toLocaleString('en-US')} GONE`, true); }
+            if (b.type === 'bank') { f.robbed += amount; this.repChange(u.fam, -6); this.news(`VAULT EMPTIED AT ${b.name.toUpperCase()}: $${amount.toLocaleString('en-US')} GONE`, true); }
             else { b.cracked = true; this.s.flags['cracked:' + b.tag] = 1; this.news(`Safe at ${b.name} found open and empty`, false); }
             b.safe = 0;
             u.heat = Math.min(MAX_HEAT, u.heat + (b.type === 'bank' ? 35 : 10) * this.heatMult(u));
@@ -730,6 +821,7 @@ export class World {
             this.toast(u.fam, `${u.name} cracked the safe: +$${amount}`, b.door);
           } else if (act === 'torch') {
             b.fire = 25;
+            this.repChange(u.fam, -8);
             this.ev({ k: 'fire', b: b.id } as GameEvent);
             u.heat = Math.min(MAX_HEAT, u.heat + 30 * this.heatMult(u));
             grantXp(u, 40);
@@ -894,6 +986,12 @@ export class World {
         const n = Math.min(space, b.stock);
         b.stock -= n; v.cargo += n;
         if (!quiet || n) this.toast(v.fam, `Loaded ${n} crates at ${b.name}.`, b.door);
+      } else if (b.type === 'landing') {
+        if (b.stock <= 0) { if (!quiet) this.toast(v.fam, 'No boat at the landing. They come some nights between 21:00 and 03:00.', b.door); return; }
+        const price = f.rep >= 25 ? 10 : 12;
+        const n = Math.min(space, b.stock, Math.floor(f.money / price));
+        b.stock -= n; f.money -= n * price; v.cargo += n;
+        this.toast(v.fam, `Bought ${n} crates off the boat for $${n * price}.`, b.door);
       } else if (b.type === 'pier' && (!b.owner || b.owner === v.fam)) {
         if (!this.night()) { if (!quiet) this.toast(v.fam, 'The smugglers only deal after dark.', b.door); return; }
         const price = b.owner === v.fam ? 8 : 15;
@@ -953,12 +1051,14 @@ export class World {
 
   // ---------- combat ----------
   heatMult(u: Unit): number {
-    const d = this.s.families[u.fam]?.human ? DIFFICULTY[this.difficulty].heat : 1;
-    return Math.max(0.3, 1 - u.stats.stealth * 0.06) * (this.night() ? 0.65 : 1) * d;
+    const f = this.s.families[u.fam];
+    const d = f?.human ? DIFFICULTY[this.difficulty].heat : 1;
+    const rep = f ? Math.max(-100, Math.min(100, f.rep)) : 0;
+    return Math.max(0.3, 1 - u.stats.stealth * 0.06) * (this.night() ? 0.65 : 1) * d * (1 - rep / 250) * (this.s.rain ? 0.7 : 1);
   }
   /** How close an enemy must be to notice this unit. */
   detectRange(u: Unit): number {
-    const base = this.night() ? NIGHT_SIGHT : SIGHT;
+    const base = (this.night() ? NIGHT_SIGHT : SIGHT) * (this.s.rain ? 0.75 : 1);
     if (this.s.time - u.lastShot < 3) return base + 2;
     let r = base;
     if (u.stance === 'passive' || u.spec === 'hitman') r = Math.max(1.6, base - u.stats.stealth * 0.6);
@@ -1025,7 +1125,7 @@ export class World {
     for (const u of fighters) {
       if (u.loc !== 'street' || u.target >= 0 || u.stance !== 'aggressive' || u.order.k !== 'idle' || u.cop) continue;
       if ((s.tick + u.id) % 8 !== 0) continue;
-      const sight = this.night() ? NIGHT_SIGHT : SIGHT;
+      const sight = (this.night() ? NIGHT_SIGHT : SIGHT) * (s.rain ? 0.75 : 1);
       let best: Unit | null = null, bd = sight;
       const aiFam = !s.families[u.fam]?.human;
       for (const t of fighters) {
@@ -1070,6 +1170,7 @@ export class World {
     if (u.moving) chance *= 0.75;
     if (u.loc === 'car') { const v = this.vehicle(u.car); if (v && v.path.length) chance *= 0.65; }
     if (this.night()) chance *= 0.9;
+    if (s.rain) chance *= 0.88;
     const unaware = s.time - t.lastHurt > 6 && d > this.detectRange(u) * 0.5 && t.target !== u.id;
     if (u.spec === 'hitman' && unaware) chance = Math.max(chance, 0.9);
     const hit = this.rng.chance(Math.min(0.97, chance));
@@ -1124,6 +1225,7 @@ export class World {
       if (lv) this.ev({ k: 'levelup', unit: by.id, fam: by.fam } as GameEvent);
       if (!by.cop) by.heat = Math.min(MAX_HEAT, by.heat + (t.cop ? 45 : 14) * this.heatMult(by));
       if (t.cop && !by.cop) {
+        this.repChange(by.fam, -10);
         for (const x of s.units) if (x.fam === by.fam && !x.cop) x.heat = Math.min(MAX_HEAT, x.heat + 10);
         this.news(`POLICE OFFICER GUNNED DOWN ON ${this.nearestStreet(t).toUpperCase()}`, true);
       }
@@ -1259,7 +1361,7 @@ export class World {
         if (dx * dx + dy * dy <= r2) vis[y * w + x] = 1;
       }
     };
-    const sight = this.night() ? NIGHT_SIGHT : SIGHT;
+    const sight = (this.night() ? NIGHT_SIGHT : SIGHT) * (this.s.rain ? 0.75 : 1);
     for (const u of this.s.units) if (u.fam === fam && (u.loc === 'street' || u.loc === 'car' || u.loc === 'inside')) mark(this.pos(u), u.loc === 'inside' ? BUILDING_SIGHT : sight);
     for (const b of this.s.buildings) if (b.owner === fam) mark(b.door, BUILDING_SIGHT);
     return vis;

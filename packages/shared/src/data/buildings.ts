@@ -35,6 +35,8 @@ export const BTYPES: Record<BType, BTypeDef> = {
   cityhall: { name: 'City Hall', income: 0, price: 0, front: false, business: false, floors: [4, 4], icon: '🏛', look: 'civic' },
   courthouse: { name: 'Courthouse', income: 0, price: 0, front: false, business: false, floors: [3, 3], icon: '⚖', look: 'civic' },
   church: { name: 'Church', income: 0, price: 0, front: false, business: false, floors: [3, 3], icon: '✝', look: 'church' },
+  amusement: { name: 'Pleasure Pier', income: 170, price: 2400, front: true, business: true, floors: [1, 1], icon: '🎡', look: 'amusement' },
+  landing: { name: 'Boardwalk Landing', income: 0, price: 0, front: false, business: false, floors: [1, 1], icon: '⛵', look: 'landing' },
   pier: { name: 'Smugglers\' Pier', income: 30, price: 500, front: false, business: true, floors: [1, 1], icon: '⚓', look: 'pier' },
   tenement: { name: 'Tenement', income: 0, price: 0, front: false, business: false, floors: [3, 6], icon: '🏠', look: 'tenement' },
   park: { name: 'Park', income: 0, price: 0, front: false, business: false, floors: [0, 0], icon: '🌳', look: 'park' },
@@ -81,3 +83,12 @@ export function shopName(type: BType, proprietor: string, i: number): string {
   if (!list) return BTYPES[type].name;
   return list[i % list.length].replace('{p}', proprietor);
 }
+
+export const REP_LEVELS: { min: number; name: string; desc: string }[] = [
+  { min: 60, name: 'Pillar of the community', desc: 'People tip you off, witnesses forget your face, and the police hardly raid you.' },
+  { min: 25, name: 'Respected', desc: 'Shopkeepers pay a little faster and witnesses keep quiet.' },
+  { min: -25, name: 'Tolerated', desc: 'The city looks the other way, for now.' },
+  { min: -60, name: 'Feared', desc: 'People talk to the police. Every crime brings more heat.' },
+  { min: -999, name: 'Public enemy', desc: 'Informants everywhere, extortion is slow, raids are frequent.' },
+];
+export function repLevel(rep: number) { return REP_LEVELS.find((l) => rep >= l.min)!; }

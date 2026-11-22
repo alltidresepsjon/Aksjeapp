@@ -28,6 +28,46 @@ Gangstere får erfaring av drap, overtakelser, kupp og av å overleve kapitler. 
 - Lønn trekkes kl. 06:00. Har du for lite penger, slutter den som tjener mest.
 - Razzia kan komme kl. 23:00. Sjansen øker med heat. En bestukket politikaptein stopper razziaer, og vakter kan av og til jage politiet bort.
 
+## Sjøsiden: fornøyelsespiren og landingsbrygga
+
+Alle kart med gate langs sørkanten har to steder ute ved strandpromenaden:
+
+- **Halloran Pleasure Pier** (pariserhjul og paviljong) er en bedrift som tjener $170 per dag. Du kan presse den for penger, ta den med makt eller kjøpe den lovlig for $2 400.
+  - Driver du den rent, øker omdømmet hver dag.
+  - Gjemmer du en spillehule bak den, tjener du mer, men folk merker det, og omdømmet synker litt hver dag.
+- **Boardwalk Landing**: Noen netter (55 %) legger en smuglerbåt til kl. 21 med 8–16 kasser. Den blir liggende til kl. 03. Kassene koster $12, eller $10 med godt omdømme. Uncle Tommaso sier fra, og du henter dem med bil.
+
+## Omdømme
+
+Familien har et rykte blant vanlige folk, fra −100 til +100. Nivåene er *Public enemy*, *Feared*, *Tolerated*, *Respected* og *Pillar of the community*.
+
+| Hva du gjør | Effekt |
+|---|---|
+| Kjøpe lovlig | +3 (piren +10) |
+| Drive rene bedrifter | Opptil +6 per morgen; ren pir +4 per morgen |
+| Gi $250 til kirken (én gang per dag) | +12 |
+| Presse for penger | −1 |
+| Ta med makt | −3 (piren −6) |
+| Rackets | −0,3 per morgen hver; spillehule på piren −2 |
+| Ran, brann, drepte politimenn | −6, −8, −10 |
+
+Ryktet glir sakte tilbake mot nøytralt (3 % per dag).
+
+| Omdømme | Virkning |
+|---|---|
+| Godt | Mindre heat for alt (opptil −40 %), raskere pressepenger, færre razziaer. Fra 40: 40 % sjanse hver morgen for et tips om hvor rivalene er |
+| Dårlig | Mer heat, tregere pressepenger, flere razziaer. Fra −40: 40 % sjanse hver morgen for at en tyster gir en av dine +30 heat |
+
+## Regn
+
+Rundt 30 % av dagene regner det noen timer, mellom 10:00 og 06:00. Mens det regner:
+
+- gir alt 30 % mindre heat, fordi det er færre vitner
+- ser alle bare 75 % så langt, både dine folk og rivalene
+- treffer skudd 12 % dårligere
+
+Uncle Tommaso varsler når regnet kommer.
+
 ## Heat og politi
 
 Skudd, drap, overtakelser, brann og kupp gir heat. Stealth og mørke demper det. Fra 50 i heat jakter politiet på personen og arresterer ved kontakt. Politiet skyter bare på dem som skyter på politiet, eller på svært ettersøkte folk med holdningen *Attack*. Heat synker raskere når du gjemmer deg inne i et bygg.

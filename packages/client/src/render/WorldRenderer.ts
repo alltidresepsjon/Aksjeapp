@@ -298,6 +298,7 @@ export class WorldRenderer {
     if (this.buildings.size || !view.buildings.length) return;
     for (const b of view.buildings) {
       if (b.type === 'park' || b.type === 'water' || b.type === 'plaza') continue;
+      if (b.type === 'amusement' || b.type === 'landing') { this.addSeafront(b); continue; }
       const custom = this.pack?.building(b.type, BTYPES[b.type].look, b.size, b.seed) ?? null;
       if (custom) { this.addCustomBuilding(b, custom); continue; }
       const art = buildingArt(b);
@@ -325,6 +326,31 @@ export class WorldRenderer {
       const T = toScreen(b.x + INSET, b.y + INSET), R = toScreen(b.x + INSET + s, b.y + INSET), B = toScreen(b.x + INSET + s, b.y + INSET + s), L = toScreen(b.x + INSET, b.y + INSET + s);
       const Hh = art.height + (b.type === 'church' ? 60 : 12);
       this.buildings.set(b.id, { b, art, spr, lit, flag: fl, burned: null, dayTex, depth, fade: 1, custom: false, poly: [T.x, T.y - Hh, R.x, R.y - Hh, R.x, R.y, B.x, B.y, L.x, L.y, L.x, L.y - Hh] });
+    }
+  }
+
+  /** The pier and the landing are drawn by the outskirts; here they get a clickable area and a flag. */
+  private addSeafront(b: Building) {
+    const pier = b.type === 'amusement';
+    const x0 = b.x, x1 = b.x + b.size, y0 = b.y - 2.4, y1 = pier ? b.y + 11.6 : b.y + 6.6;
+    const T = toScreen(x0, y0), R = toScreen(x1, y0), B = toScreen(x1, y1), L = toScreen(x0, y1);
+    const top = pier ? 190 : 40;
+    const spr = new Sprite(Texture.EMPTY);
+    const fl = new Sprite(this.flagTex);
+    fl.anchor.set(0.05, 1);
+    fl.scale.set(1 / SPRITE_RES);
+    const fp = toScreen(b.x + 1.5, b.y + 3.5);
+    fl.position.set(fp.x + 6, fp.y - (pier ? 92 : 20));
+    const depth = x1 + y1 + 60;
+    fl.zIndex = depth;
+    this.objects.addChild(fl);
+    const art: BuildingArt = { day: null as unknown as HTMLCanvasElement, lit: null as unknown as HTMLCanvasElement, ox: 0, oy: 0, w: 0, h: 0, flag: { x: 0, y: 0 }, height: pier ? 90 : 20 };
+    const poly = [T.x, T.y - top, R.x, R.y - top, R.x, R.y, B.x, B.y, L.x, L.y, L.x, L.y - top];
+    this.buildings.set(b.id, { b, art, spr, lit: new Sprite(Texture.EMPTY), flag: fl, burned: null, dayTex: Texture.EMPTY, depth: -1000, fade: 1, custom: true, poly });
+    if (!pier && this.out.boat) {
+      this.out.boat.sprite.zIndex = this.out.boat.depth;
+      this.objects.addChild(this.out.boat.sprite);
+      this.lights.addChild(this.out.boat.lit);
     }
   }
 
@@ -389,6 +415,13 @@ export class WorldRenderer {
     for (const c of this.out.back.children) if (c !== this.out.night) (c as Graphics).tint = ambient;
     this.out.night.alpha = nf;
     for (const o of this.out.objects) { o.sprite.tint = ambient; if (o.lit) { o.lit.alpha = nf; o.lit.visible = nf > 0.05; } }
+    if (this.out.boat) {
+      const landing = view.buildings.find((x) => x.type === 'landing');
+      const here = !!landing && landing.stock > 0;
+      this.out.boat.sprite.visible = here; this.out.boat.lit.visible = here;
+      this.out.boat.sprite.tint = ambient; this.out.boat.lit.alpha = Math.max(0.4, nf);
+      this.out.boat.sprite.rotation = Math.sin(this.time * 1.3) * 0.02;
+    }
     this.steamT -= dt;
     if (this.steamT <= 0) {
       this.steamT = 0.25;

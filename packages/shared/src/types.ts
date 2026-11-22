@@ -17,12 +17,13 @@ export type Racket = 'speakeasy' | 'still' | 'gambling';
 export type BType =
   | 'hq' | 'bakery' | 'barber' | 'laundry' | 'pawn' | 'diner' | 'tailor' | 'grocer'
   | 'garage' | 'warehouse' | 'club' | 'casino' | 'hotel' | 'bank' | 'precinct'
-  | 'cityhall' | 'courthouse' | 'church' | 'pier' | 'tenement' | 'park' | 'water' | 'plaza';
+  | 'cityhall' | 'courthouse' | 'church' | 'pier' | 'tenement' | 'park' | 'water' | 'plaza'
+  | 'amusement' | 'landing';
 
 /** Things a unit can do at a building's door. */
 export type Act =
   | 'enter' | 'extort' | 'takeover' | 'buy' | 'crack' | 'torch' | 'cards'
-  | 'bribe' | 'spring' | 'load' | 'unload' | 'arm';
+  | 'bribe' | 'spring' | 'load' | 'unload' | 'arm' | 'donate';
 
 export type UnitLoc = 'street' | 'inside' | 'car' | 'jail' | 'dead' | 'held';
 
@@ -168,6 +169,8 @@ export interface Family {
   nextAi: number;
   edge: boolean;
   income: number;
+  /** Standing with ordinary people, −100 (public enemy) … +100 (pillar of the community). */
+  rep: number;
 }
 
 export interface Ad {
@@ -264,4 +267,6 @@ export interface WorldState {
   fog: boolean;
   timeLimitDay: number;
   interrupt: number;
+  /** 1 while it rains (fewer witnesses, shorter sight). */
+  rain: number;
 }

@@ -269,3 +269,8 @@ h4.sub { margin: 14px 0 6px; color: var(--gold); font-family: Limelight, serif; 
 .logo { display: block; width: min(560px, 90%); margin: 0 auto; filter: drop-shadow(0 6px 24px rgba(0,0,0,.6)); }
 .brief-art img { display: block; width: 100%; border-radius: 4px; margin: 4px 0 10px; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
 .screen { background-size: cover; background-position: center; }
+
+.stat .bar.rep { position: relative; background: #2a2f3b linear-gradient(90deg, transparent 49%, rgba(255,255,255,.35) 49% 51%, transparent 51%); }
+.stat .bar.rep i { position: absolute; top: 0; height: 100%; }
+#h-rep b { font-size: 12.5px; }
+@media (max-width: 820px) { #h-rep { display: none; } }

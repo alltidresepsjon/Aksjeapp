@@ -2,7 +2,7 @@
 
 import { Application, Graphics, Sprite, Texture } from 'pixi.js';
 import {
-  BTYPES, OFFICIALS, RACKETS, SPEC_INFO, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, isNight, isOpen, nightFactor,
+  BTYPES, OFFICIALS, RACKETS, SPEC_INFO, repLevel, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, isNight, isOpen, nightFactor,
   type Act, type Building, type Command, type GameEvent, type Racket, type Stance, type StatKey, type Unit, type Vehicle, type ViewState, type WeaponId,
 } from '@bg/shared';
 import { WorldRenderer, type Hit } from '../render/WorldRenderer';
@@ -60,6 +60,7 @@ export class Game {
         <div class="stat" id="h-inc"><small>Per day</small><b>$0</b></div>
         <div class="stat" id="h-time"><small>Day 1</small><b>08:00</b><div class="bar"><i></i></div></div>
         <div class="stat" id="h-heat"><small>Heat</small><b>0</b><div class="bar heat"><i></i></div></div>
+        <div class="stat" id="h-rep" title="Your standing with ordinary people"><small>Name</small><b>Tolerated</b><div class="bar rep"><i></i></div></div>
         <div id="speed">
           <button data-sp="0" title="Pause (Space)">❚❚</button>
           <button data-sp="1" title="Normal speed (1)">1×</button>
@@ -159,14 +160,11 @@ export class Game {
   private rainG!: Graphics;
   private vignette!: Sprite;
   private rainDrops: { x: number; y: number; v: number }[] = [];
-  /** Some days it rains on Port Halloran (purely for looks). */
+  /** Rain (decided by the simulation: fewer witnesses, shorter sight). */
   private weather(dt: number, v: ViewState) {
     const sw = this.app.screen.width, sh = this.app.screen.height;
     this.vignette.width = sw; this.vignette.height = sh;
-    let h = 0;
-    for (const ch of v.chapter) h = (h * 31 + ch.charCodeAt(0)) | 0;
-    const rainyDay = ((v.day * 7 + h) >>> 0) % 3 === 0;
-    const want = rainyDay && v.hour > 11 && v.hour < 23 ? 1 : 0;
+    const want = v.rain ? 1 : 0;
     this.renderer.rain += (want - this.renderer.rain) * Math.min(1, dt * 0.5);
     const g = this.rainG;
     g.clear();
@@ -179,7 +177,7 @@ export class Game {
       if (d.y > sh) { d.y = -20; d.x = Math.random() * (sw + 100); }
       g.moveTo(d.x, d.y).lineTo(d.x + 3, d.y - 16);
     }
-    g.stroke({ width: 1, color: 0xc8d4e0, alpha: 0.35 * this.renderer.rain });
+    g.stroke({ width: 1.4, color: 0xd0dce8, alpha: 0.55 * this.renderer.rain });
   }
   private cameraPlaced = false;
   /** Start the camera at our headquarters (a little toward the city centre), once the state has arrived. */
@@ -710,6 +708,14 @@ export class Game {
     $('#h-heat b', r).textContent = String(Math.round(mh));
     ($('#h-heat b', r) as HTMLElement).style.color = mh >= 50 ? '#ff7a6a' : '';
     ($('#h-heat i', r) as HTMLElement).style.width = mh + '%';
+    const lvl = repLevel(fam.rep);
+    $('#h-rep b', r).textContent = lvl.name.replace('Pillar of the community', 'Pillar');
+    ($('#h-rep', r) as HTMLElement).title = `Standing with the public: ${Math.round(fam.rep)}. ${lvl.desc}`;
+    const ri = $('#h-rep i', r) as HTMLElement;
+    ri.style.width = Math.abs(fam.rep) / 2 + '%';
+    ri.style.marginLeft = fam.rep >= 0 ? '50%' : 50 - Math.abs(fam.rep) / 2 + '%';
+    ri.style.background = fam.rep >= 0 ? '#7be08f' : '#e0505f';
+    $('#h-time small', r).textContent += v.rain ? ' ☂' : '';
     const sp = this.sess.paused ? '0' : this.sess.skipping ? 'skip' : String(this.sess.speed);
     $$('#speed button', r).forEach((b) => b.classList.toggle('on', b.dataset.sp === sp));
     ($('#speed .skip', r) as HTMLElement).title = night ? 'Skip to dawn (N)' : 'Skip to dusk (N)';
@@ -798,6 +804,7 @@ export class Game {
         return `<div class="mis ${o.done ? 'done' : ''} ${o.failed ? 'failed' : ''} ${!o.done && !locked ? 'cur' : ''}"><p class="goal">${o.done ? '✓' : o.failed ? '✕' : locked ? '…' : '▸'} ${esc(locked ? 'Not yet' : o.text)}${o.progress && !o.done && !locked ? ` <span class="prog">${esc(o.progress)}</span>` : ''}</p>${o.optional ? '<small>Optional</small>' : ''}</div>`;
       }).join('');
       if (this.opts.tip) html += `<p class="hint">💡 ${esc(this.opts.tip)}</p>`;
+      { const f = v.families[this.sess.fam]; const l = repLevel(f.rep); html += `<div class="mis"><h4>Your name on the street: ${esc(l.name)} (${Math.round(f.rep)})</h4><p>${esc(l.desc)} Buying, running clean businesses and donating to the church raise it; muscle, fire, bank jobs and dead policemen lower it.</p></div>`; }
       html += `<p class="hint">Keep Nico alive and hold your headquarters. If either is lost, the chapter is lost.</p>`;
     }
     setHtml($('#p-goals', this.root), html);
@@ -864,6 +871,7 @@ export class Game {
       if (def.business && !own && !b.burned && b.type !== 'hq' && !b.owner) acts.push(`<button class="btn gold" data-a="act" data-v="extort" ${disabled(open)} title="Quiet. Faster with Charm. Shops are open 8:00–20:00.">Extort${n}${open ? '' : ' (closed)'}</button>`);
       if (def.business && !own && !b.burned) acts.push(`<button class="btn red" data-a="act" data-v="takeover" title="Loud. Faster with Muscle. Clear out any defenders first.">Muscle in${n}</button>`);
       if (!b.owner && def.price) acts.push(`<button class="btn" data-a="act" data-v="buy" ${disabled(open && fam.money >= b.price)}>${b.burned ? 'Rebuild' : 'Buy'} ~${money(b.price * (b.burned ? 1.2 : 1) * (fam.payroll.hall > 0 ? 0.7 : 1))}</button>`);
+      if (b.type === 'church') acts.push(`<button class="btn gold" data-a="act" data-v="donate" title="Improves your standing with ordinary people">Donate $250 to the parish</button>`);
       if (b.type === 'precinct' || b.type === 'cityhall' || b.type === 'courthouse') {
         const o = OFFICIALS[b.type];
         acts.push(`<button class="btn gold" data-a="act" data-v="bribe" title="${esc(o.effect)}">Bribe the ${o.who} ~${money(o.cost)}</button>`);
@@ -875,7 +883,7 @@ export class Game {
       if (b.type === 'pawn' && (!b.owner || own)) acts.push(`<div class="guns">${WEAPON_LIST.map((w: WeaponId) => { const p = Math.round(WEAPONS[w].price * (own ? 0.5 : 1)); return `<button class="mini" data-a="act" data-v="arm" data-arg="${w}" ${fam.money < p ? 'disabled' : ''} title="${esc(WEAPONS[w].desc)}">${WEAPONS[w].name} ${money(p)}</button>`; }).join('')}</div>`);
     }
     if (this.selVehicle >= 0) {
-      if ((own && b.racket === 'still') || (b.type === 'pier' && (!b.owner || own))) acts.push(`<button class="btn" data-a="cargo" data-v="load">Load crates here</button>`);
+      if ((own && b.racket === 'still') || (b.type === 'pier' && (!b.owner || own)) || (b.type === 'landing' && b.stock > 0)) acts.push(`<button class="btn" data-a="cargo" data-v="load">Load crates here</button>`);
       if (own && b.racket === 'speakeasy') acts.push(`<button class="btn" data-a="cargo" data-v="unload">Unload crates here</button>`);
     }
     let extra = '';
@@ -898,6 +906,8 @@ export class Game {
       const held = v.units.filter((u) => u.loc === 'held' && u.heldBy === this.sess.fam);
       if (held.length) extra += `<div class="sub">In the cellar: ${held.map((u) => `<b>${esc(u.name)}</b> <button class="mini" data-a="hostage" data-v="interrogate" data-id="${u.id}">Interrogate</button><button class="mini" data-a="hostage" data-v="ransom" data-id="${u.id}">Ransom</button>`).join(' ')}</div>`;
     }
+    if (b.type === 'landing') extra += `<div class="sub">${b.stock > 0 ? `A rum-runner's boat is tied up here with <b>${b.stock} crates</b> at $${fam.rep >= 25 ? 10 : 12} each, until 03:00. Select one of your cars, then press "Load crates here".` : 'No boat tonight. Smugglers tie up here some nights between 21:00 and 03:00; Uncle Tommaso will tell you.'}</div>`;
+    if (b.type === 'amusement') extra += `<div class="sub mute">Run it clean and the whole city likes you better every day. Hide a gambling den behind it and it pays more, but people notice.</div>`;
     if (b.type === 'bank') extra += `<div class="sub mute">Vault: about ${money(b.safe)}. ${night ? 'Closed for the night.' : 'Open for business — too many witnesses.'}</div>`;
     if (!us.length && !own && !extra) acts.push('<div class="hint">Select crew first, then choose what to do here.</div>');
     const title = b.type === 'hq' ? `★ ${esc(b.name)}` : `${def.icon} ${esc(b.name)}`;

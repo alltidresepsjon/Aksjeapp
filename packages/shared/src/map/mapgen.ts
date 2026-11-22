@@ -194,3 +194,16 @@ export function turfLayout(seed: number, players: number): Layout {
     streetsV: ['1st Ave', 'Kettle Ln', 'Market St', 'Harbor Way', 'Union Ave', 'Elm St', 'Quarry Rd'],
   };
 }
+
+export interface EdgeSite { x: number; y: number; size: number; door: Pt }
+
+/** The Pleasure Pier and the Boardwalk Landing on the sea front south of the map (null where the edge is water). */
+export function edgeSites(map: MapData): { amusement: EdgeSite | null; landing: EdgeSite | null } {
+  const roadAt = (x: number) => map.tiles[(map.h - 1) * map.w + Math.floor(x)] === TILE_ROAD;
+  const px = Math.max(4, map.w - 9);
+  const lx = 4;
+  const site = (x: number): EdgeSite | null => roadAt(x + 1.5) ? { x, y: map.h + 2.4, size: 3, door: { x: x + 1.5, y: map.h - 0.6 } } : null;
+  const amusement = site(px);
+  const landing = lx + 4 < px ? site(lx) : null;
+  return { amusement, landing };
+}

@@ -189,6 +189,7 @@ Felles setning til alle ikonene:
 | `icon-cards.png` | a fan of playing cards with an ace on top |
 | `icon-kidnap.png` | a coil of rope and a burlap sack |
 | `icon-arm.png` | a Tommy gun |
+| `icon-donate.png` | a collection plate with coins |
 | `icon-enter.png` | an open door with warm light |
 | `icon-spring.png` | a jail cell key |
 | `icon-passive.png` | a lowered fedora (hat over the eyes) |

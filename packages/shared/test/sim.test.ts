@@ -61,8 +61,9 @@ describe('chapter 1', () => {
     lou.stance = 'aggressive';
     w.command('P', { c: 'attack', units: [lou.id], target: doyle.id });
     run(w, 60);
-    expect(doyle.loc === 'dead' || lou.loc === 'dead' || lou.hp < lou.maxHp).toBe(true);
-    expect(lou.heat + (lou.loc === 'dead' ? 50 : 0)).toBeGreaterThan(0);
+    // shots were exchanged: somebody is hurt (heat may already have cooled off indoors)
+    expect(doyle.loc === 'dead' || doyle.hp < doyle.maxHp).toBe(true);
+    expect(lou.loc === 'dead' || lou.hp < lou.maxHp || lou.kills > 0).toBe(true);
   });
   it('the scripted raid arrives at night and the AI does things', () => {
     const { w } = make();

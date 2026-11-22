@@ -55,7 +55,7 @@ export class NetSession implements Session {
 
   constructor(private net: Net, readonly fam: FamId, layout: Layout, startHour: number) {
     this.map = generateMap(layout);
-    this.empty = { mode: 'turf', chapter: 'turf', tick: 0, time: 0, day: 1, hour: startHour, units: [], buildings: [], vehicles: [], families: {}, order: [], news: [], ads: [], events: [], objectives: [], result: null, fog: true, timeLimitDay: 0 };
+    this.empty = { mode: 'turf', chapter: 'turf', tick: 0, time: 0, day: 1, hour: startHour, units: [], buildings: [], vehicles: [], families: {}, order: [], news: [], ads: [], events: [], objectives: [], result: null, fog: true, timeLimitDay: 0, rain: 0 };
     this.off = net.on((m) => {
       if (m.t === 'snap') this.onSnap(m.s);
       else if (m.t === 'cmdErr' || m.t === 'error') this.onError?.(m.text);
