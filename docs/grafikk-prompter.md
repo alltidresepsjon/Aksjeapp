@@ -6,10 +6,24 @@ Spillet bruker bildene dine automatisk der de finnes. Alt som mangler, tegnes fo
 
 1. Åpne **én** ny samtale i ChatGPT per gruppe (hus, figurer, biler, grensesnitt). Bruk den samme samtalen for hele gruppen, så holder stilen seg likere.
 2. Lim inn **stilbeskrivelsen** (del 1) som første melding i hver samtale.
-3. Lim deretter inn én prompt om gangen. Last ned hvert bilde som PNG.
+3. Lim deretter inn én prompt om gangen, **og legg ved riktig mal-tegning fra `docs/maler/`** (se tabellen under). Malen er det viktigste for at vinkelen blir riktig. Last ned hvert bilde som PNG.
 4. Gi filen **nøyaktig** navnet som står foran prompten, for eksempel `building-shop-3-1.png`.
 5. Legg filene i `art-inbox/` (via GitHub: «Add file → Upload files»), eller send dem til meg i chatten.
 6. Kjør `npm run art`, eller be meg gjøre det. Skriptet fjerner bakgrunnen, beskjærer og skalerer bildene.
+
+**Maler (last ned fra `docs/maler/` og legg ved hver gang)**
+
+| Mal | Brukes til |
+|---|---|
+| `mal-hus-lav.png` | Hus i 1–2 etasjer (butikker, diner, garasje, frisør) |
+| `mal-hus-middels.png` | Hus i 3–4 etasjer (bakeri/hovedkvarter, leiegårder, klubber, politistasjon) |
+| `mal-hus-hoyt.png` | Hus i 5–8 etasjer (hoteller, høye leiegårder) |
+| `mal-figur.png` | Alle figurark (fire positurer) |
+| `mal-bil.png` | Alle biler |
+
+Den grå ruta i malen er tomta, og den blå klossen viser hvordan vegger og tak skal stå. Huset kan stikke ut av klossen med tak, tårn og markiser, men alle kanter skal ha **samme retning** som klossens kanter.
+
+**Sjekk vinkelen:** Kjør `npm run art:check` (eller be meg gjøre det). Da legges en turkis fasit-kloss oppå hvert hus i `art-inbox/sjekk/`. Hvis veggene vider seg ut oppover, eller takkanten er flatere enn bakken, har ChatGPT brukt perspektiv. Be den lage bildet på nytt med setningen under «Retting».
 
 **Tips**
 - Be om *transparent background* der det står. Får du likevel en ensfarget hvit eller grå bakgrunn, fjerner skriptet den.
@@ -33,15 +47,35 @@ Late-afternoon golden light from the upper left, a faint sea haze, subtle film g
 three-piece suits, fedoras and bowler hats, cloche hats and furs, electric light-bulb marquees, striped awnings,
 art-deco ornament. Detailed, but still readable when shown small. No cartoon outlines, no photo-realism, no modern objects.
 
-CAMERA (for buildings, people and cars): classic 2:1 isometric game view (dimetric, about 30° above the ground),
-looking from the south-east, so the object's front-left and front-right sides are both visible and its nearest
-corner points straight down. Never a straight front view, never top-down.
+CAMERA (for buildings, people and cars) — this is a game sprite, so the geometry must be exact:
+- Use a strict ISOMETRIC PARALLEL PROJECTION (2:1 pixel-art isometric / dimetric, like a technical axonometric drawing).
+  There is NO perspective: no vanishing points, no foreshortening, no wide-angle lens.
+- Every vertical edge is perfectly vertical and all verticals are parallel. The building is exactly as wide at the top
+  as at the bottom; walls never lean outwards or inwards.
+- Every horizontal edge (ground outline, roof edges, cornices, rows of windows, awnings, steps) runs along one of two
+  directions only: down-left or down-right, with a slope of exactly 1:2 (it drops 1 pixel for every 2 pixels across,
+  about 26.57°). A roof outline is the same diamond shape as the ground outline, only higher up.
+- Viewed from the south-east: the front-left wall and the front-right wall are both visible, the nearest corner points
+  straight down to the bottom centre of the image.
+- I will attach a template image. Build the object inside it: its grey diamond is the ground plot, its blue box shows
+  the exact angle of walls and roof. Match the template's angles precisely; do not copy its colours or lines.
 
 FRAMING: exactly ONE object, centred, fully visible, nothing cropped. Transparent background (or plain flat white if
 transparency is not possible). No ground, no street, no sky, no other objects, no shadow outside the object.
 No text, letters or numbers anywhere (signs and posters stay blank or show simple pictures) unless I ask for text.
 
 Reply only with the image.
+```
+
+### Retting når vinkelen blir feil
+
+Lim inn dette sammen med malen på nytt:
+
+```
+The angle is wrong: you drew it with perspective. Redraw the SAME building in strict isometric parallel projection,
+exactly matching the attached template: all vertical edges perfectly vertical and parallel (the top is as wide as the
+bottom), and every roof, cornice and window-row edge parallel to the ground diamond's edges at a 1:2 slope.
+No vanishing points. Keep everything else the same.
 ```
 
 ## 2. Hus
@@ -54,7 +88,7 @@ Viktig for husene:
 - Bruk kvadratisk format, 1024×1024.
 
 Legg til denne setningen i hver huprompt:
-> *The building stands on a perfectly square footprint; its lowest corner is at the bottom centre of the image and its left and right corners touch the left and right edges.*
+> *Use the attached template: the building stands on its grey square plot, lowest corner at the bottom centre, left and right corners at the template's left and right corners. Strict isometric parallel projection, no perspective: walls exactly vertical, roof edges parallel to the ground edges at a 1:2 slope.*
 
 | Filnavn | Prompt |
 |---|---|
@@ -96,7 +130,7 @@ Hver figur lages som **ett bredt bilde med fire positurer side om side**. Da bli
 Bruk liggende format, 1536×1024. Skriptet deler bildet i fire like store deler. Lager du bare én figur i et høyt bilde, brukes den som stillbilde.
 
 Legg til dette i hver figurprompt:
-> *A character sprite sheet: the SAME character drawn four times side by side in a single row, evenly spaced, all the same size, all turned three-quarters towards the bottom-right: (1) standing, (2) walking with left foot forward, (3) walking with right foot forward, (4) aiming the weapon to the right. Full body, feet on the same baseline, small readable silhouette, transparent background.*
+> *A character sprite sheet: the SAME character drawn four times side by side in a single row, evenly spaced, all the same size, all turned three-quarters towards the bottom-right: (1) standing, (2) walking with left foot forward, (3) walking with right foot forward, (4) aiming the weapon to the right. Full body, feet on the same baseline, small readable silhouette, transparent background. Use the attached template for size, baseline and facing direction (the red arrow); strict isometric view, no perspective.*
 
 | Filnavn | Prompt |
 |---|---|
@@ -129,7 +163,7 @@ Viktig for bilene:
 - Bruk liggende format, 1536×1024.
 
 Legg til denne setningen i hver bilprompt:
-> *Painted in plain neutral light grey (no other body colour); chrome, glass, tyres and lamps keep their own colours. Transparent background.*
+> *Painted in plain neutral light grey (no other body colour); chrome, glass, tyres and lamps keep their own colours. Transparent background. Use the attached template: the car's footprint lies on the grey ground box, nose pointing along the red arrow for "front" images; strict isometric parallel projection, no perspective.*
 
 | Filnavn | Prompt |
 |---|---|

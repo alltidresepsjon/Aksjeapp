@@ -18,7 +18,9 @@
     "typecheck": "tsc -p packages/shared && tsc -p packages/client && tsc -p packages/server",
     "shots": "node scripts/screenshots.mjs",
     "art": "node scripts/import-art.mjs",
-    "art:clear": "node scripts/import-art.mjs --clear"
+    "art:clear": "node scripts/import-art.mjs --clear",
+    "art:check": "node scripts/check-art.mjs",
+    "art:templates": "node scripts/make-templates.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
