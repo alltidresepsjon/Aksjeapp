@@ -1,5 +1,7 @@
 // One running mission (campaign chapter or Turf War match): map view, HUD, panels and controls.
 
+import { store } from '../ui/storage';
+import { ask } from '../ui/dialog';
 import { Application, Graphics, Sprite, Texture } from 'pixi.js';
 import {
   BTYPES, OFFICIALS, RACKETS, SPEC_INFO, repLevel, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, isNight, isOpen, nightFactor,
@@ -191,7 +193,7 @@ export class Game {
     const pull = innerWidth <= 820 ? 0 : 0.12;
     this.renderer.centerOnTile(hq.door.x + (cx - hq.door.x) * pull, hq.door.y + (cy - hq.door.y) * pull - 0.5);
     const hero = v.units.find((u) => u.fam === this.sess.fam && u.hero);
-    const tutorialAhead = v.chapter === 'c1' && !localStorage.getItem('bg-tutorial-done');
+    const tutorialAhead = v.chapter === 'c1' && !store.getItem('bg-tutorial-done');
     if (hero && !tutorialAhead) this.sel.add(hero.id);
   }
 
@@ -466,7 +468,7 @@ export class Game {
     };
     $('#adv-face', r).onclick = () => { audio.unlock(); this.toggleLog(); };
     $('#adv-tut', r).onclick = (e) => {
-      if ((e.target as HTMLElement).closest('[data-tut="skip"]')) { localStorage.setItem('bg-tutorial-done', '1'); $('#adv-tut', r).className = ''; this.glow(null); }
+      if ((e.target as HTMLElement).closest('[data-tut="skip"]')) { store.setItem('bg-tutorial-done', '1'); $('#adv-tut', r).className = ''; this.glow(null); }
     };
     $('#adv-log', r).onclick = (e) => {
       const t = e.target as HTMLElement;
@@ -514,7 +516,7 @@ export class Game {
       case 'all': this.selectAll(); return;
       case 'none': this.sel.clear(); this.selVehicle = -1; break;
       case 'bail': this.cmd({ c: 'bail', unit: id }); return;
-      case 'fire': if (confirm('Let this one go? They will leave the family for good.')) this.cmd({ c: 'fire', unit: id }); return;
+      case 'fire': void ask('Let this one go? They will leave the family for good.', 'Fire').then((ok) => { if (ok) this.cmd({ c: 'fire', unit: id }); }); return;
       case 'skill': this.cmd({ c: 'skill', unit: id, stat: t.dataset.stat as StatKey }); return;
       case 'hire': this.cmd({ c: 'hire', ad: t.dataset.ad! }); return;
       case 'stance': this.cmd({ c: 'stance', units, stance: t.dataset.v as Stance }); return;
@@ -646,7 +648,7 @@ export class Game {
   private tutT = 0;
   private tutorial(v: ViewState) {
     if (v.chapter !== 'c1' || this.sess.isNet) return;
-    if (localStorage.getItem('bg-tutorial-done')) return;
+    if (store.getItem('bg-tutorial-done')) return;
     const P = this.sess.fam;
     const mine = v.units.filter((u) => u.fam === P);
     const hq = v.buildings.find((b) => b.hqOf === P);
@@ -667,7 +669,7 @@ export class Game {
     if (st.done()) {
       this.tutStep++;
       this.tutT = 0;
-      if (this.tutStep >= steps.length) { localStorage.setItem('bg-tutorial-done', '1'); $('#adv-tut', this.root).className = ''; this.glow(null); return; }
+      if (this.tutStep >= steps.length) { store.setItem('bg-tutorial-done', '1'); $('#adv-tut', this.root).className = ''; this.glow(null); return; }
       audio.click();
     }
     const cur = steps[this.tutStep];

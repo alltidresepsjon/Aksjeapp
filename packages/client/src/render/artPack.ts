@@ -17,7 +17,7 @@ export interface ArtPack {
 
 export interface BuildingPic { tex: Texture; lit: Texture | null; ax: number; fw: number }
 
-const BASE = '/assets/graphics/';
+const BASE = `${import.meta.env.BASE_URL}assets/graphics/`;
 let cached: Promise<ArtPack> | null = null;
 
 export function loadArtPack(): Promise<ArtPack> {

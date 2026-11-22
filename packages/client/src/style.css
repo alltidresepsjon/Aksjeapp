@@ -274,3 +274,7 @@ h4.sub { margin: 14px 0 6px; color: var(--gold); font-family: Limelight, serif; 
 .stat .bar.rep i { position: absolute; top: 0; height: 100%; }
 #h-rep b { font-size: 12.5px; }
 @media (max-width: 820px) { #h-rep { display: none; } }
+
+.bg-dialog { position: fixed; inset: 0; z-index: 60; background: rgba(5,6,8,.75); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.bg-dialog p { font-size: 15px; line-height: 1.45; margin: 0 0 6px; }
+.bg-dialog .btn:empty { display: none; }

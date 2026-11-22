@@ -24,6 +24,7 @@ Vil du teste på mobilen i samme nettverk? Vite skriver ut en nettverksadresse (
 | `npm test` | Kjører testene for simuleringen (Vitest) |
 | `npm run typecheck` | TypeScript-sjekk av alle pakkene |
 | `npm run build` | Bygger klienten til `packages/client/dist` |
+| `npm run build:static -w @bg/client` | Statisk testversjon uten flerspiller (`packages/client/dist-static`), kan legges på hvilken som helst webserver |
 | `npm start` | Produksjonsserver: serverer det bygde spillet og WebSocket på samme port (`PORT`, standard 8787) |
 | `npm run art` | Importerer egne bilder fra `art-inbox/` |
 | `npm run shots` | Tar skjermbilder med Playwright (krever at `npm start` kjører) |

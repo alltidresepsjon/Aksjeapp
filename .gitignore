@@ -13,3 +13,4 @@ art-inbox/*.jpg
 art-inbox/*.webp
 art-inbox/sjekk/
 art-inbox/**/*.png
+packages/client/dist-static/

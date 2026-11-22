@@ -2,6 +2,7 @@
 // Recorded sounds and music in /assets/audio/<name>.mp3 are used when present (see CREDITS.md);
 // the synthesised versions are the fallback.
 
+import { store } from '../ui/storage';
 import type { WeaponId } from '@bg/shared';
 
 export class AudioEngine {
@@ -20,7 +21,7 @@ export class AudioEngine {
 
   constructor() {
     try {
-      const v = JSON.parse(localStorage.getItem('bg-volume') ?? 'null');
+      const v = JSON.parse(store.getItem('bg-volume') ?? 'null');
       if (v) this.volume = v;
     } catch { /* ignore */ }
   }
@@ -42,18 +43,18 @@ export class AudioEngine {
     this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
-    for (const n of ['shot-revolver', 'shot-dual', 'shot-shotgun', 'shot-tommy', 'shot-rifle', 'siren', 'engine', 'cash']) void this.tryLoad(n);
+    for (const n of ['shot-revolver', 'shot-dual', 'shot-shotgun', 'shot-tommy', 'shot-rifle', 'siren', 'engine']) void this.tryLoad(n);
     for (const n of ['music-day', 'music-day-2', 'music-night']) void this.tryLoad(n).then(() => this.maybeStartTracks());
   }
   applyVolume() {
     if (!this.ctx) return;
     this.sfxBus.gain.value = this.volume.sfx;
     this.musicBus.gain.value = this.volume.music * 0.5;
-    localStorage.setItem('bg-volume', JSON.stringify(this.volume));
+    store.setItem('bg-volume', JSON.stringify(this.volume));
   }
   private async tryLoad(name: string) {
     try {
-      const r = await fetch(`/assets/audio/${name}.mp3`);
+      const r = await fetch(`${import.meta.env.BASE_URL}assets/audio/${name}.mp3`);
       if (!r.ok || !(r.headers.get('content-type') ?? '').includes('audio')) { this.files.set(name, null); return; }
       this.files.set(name, await this.ctx!.decodeAudioData(await r.arrayBuffer()));
     } catch { this.files.set(name, null); }

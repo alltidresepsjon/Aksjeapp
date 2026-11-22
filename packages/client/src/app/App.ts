@@ -1,5 +1,7 @@
 // Screen flow: title → campaign (briefing → chapter → report → safehouse) or Turf War lobby → match.
 
+import { store } from '../ui/storage';
+import { ask, notice } from '../ui/dialog';
 import {
   CHAPTERS, SPEC_INFO, TURF_FAMILIES, VEHICLES, VEHICLE_LIST, WEAPONS, WEAPON_LIST, buildChapterWorld, finishChapter, hireFromAd,
   newCampaign, refreshSafehouseAds, spendSkillPoint, DIFFICULTY, type CampaignSave, type ChapterDef, type Difficulty, type LobbyPlayer, type ServerMsg, type StatKey, type WorldSave,
@@ -17,7 +19,7 @@ const CHAPTER_KEY = 'bg-chapter-v1';
 
 interface ChapterSave { chapter: string; crew: string[]; when: string; world: WorldSave }
 function readChapterSave(): ChapterSave | null {
-  try { return JSON.parse(localStorage.getItem(CHAPTER_KEY) ?? 'null'); } catch { return null; }
+  try { return JSON.parse(store.getItem(CHAPTER_KEY) ?? 'null'); } catch { return null; }
 }
 
 export class App {
@@ -42,12 +44,12 @@ export class App {
     });
     this.screen = el('<div class="screen"></div>');
     root.appendChild(this.screen);
-    try { const raw = localStorage.getItem(SAVE_KEY); if (raw) this.save = JSON.parse(raw); } catch { this.save = null; }
+    try { const raw = store.getItem(SAVE_KEY); if (raw) this.save = JSON.parse(raw); } catch { this.save = null; }
     this.screen.addEventListener('click', () => audio.unlock(), { capture: true });
     this.title();
   }
 
-  private persist() { if (this.save) localStorage.setItem(SAVE_KEY, JSON.stringify(this.save)); }
+  private persist() { if (this.save) store.setItem(SAVE_KEY, JSON.stringify(this.save)); }
   private show(html: string, cls = '') {
     this.screen.className = 'screen ' + cls;
     this.screen.style.backgroundImage = '';
@@ -87,8 +89,8 @@ export class App {
       const g = (e.target as HTMLElement).closest<HTMLElement>('[data-go]')?.dataset.go;
       if (g === 'continue') this.safehouseOrBriefing();
       if (g === 'resume') { const cs = readChapterSave(); const c = CHAPTERS[this.save!.chapter]; if (cs && c) this.play(c, cs.crew, cs.world); }
-      if (g === 'new') { if (!this.save || confirm('Start a new campaign? Your current progress will be replaced.')) this.pickDifficulty(); }
-      if (g === 'turf') this.turfMenu();
+      if (g === 'new') { if (!this.save) this.pickDifficulty(); else void ask('Start a new campaign? Your current progress will be replaced.', 'Start over').then((ok) => { if (ok) this.pickDifficulty(); }); }
+      if (g === 'turf') { if (import.meta.env.VITE_STATIC) void notice('Turf War is played online against friends and needs the game server. In this test version you can play the whole campaign. To play Turf War, run the game with "npm run dev" (see the README).'); else this.turfMenu(); }
       if (g === 'help') this.helpScreen();
     };
   }
@@ -104,7 +106,7 @@ export class App {
     this.screen.onclick = (e) => {
       const t = e.target as HTMLElement;
       const d = t.closest<HTMLElement>('[data-diff]')?.dataset.diff as Difficulty | undefined;
-      if (d) { localStorage.removeItem(CHAPTER_KEY); this.save = newCampaign(Date.now(), d); this.persist(); this.intro(); }
+      if (d) { store.removeItem(CHAPTER_KEY); this.save = newCampaign(Date.now(), d); this.persist(); this.intro(); }
       if (t.closest('[data-go="back"]')) this.title();
     };
   }
@@ -156,9 +158,9 @@ export class App {
       const sp = d('sp');
       if (sp) { const r = s.roster.find((x) => x.id === sp)!; spendSkillPoint(r, t.closest<HTMLElement>('[data-stat]')!.dataset.stat as StatKey); this.persist(); return this.safehouse(tab); }
       const fire = d('fire');
-      if (fire && confirm('Let them go for good?')) { s.roster = s.roster.filter((r) => r.id !== fire); this.persist(); return this.safehouse(tab); }
+      if (fire) { void ask('Let them go for good?', 'Fire').then((ok) => { if (ok) { s.roster = s.roster.filter((r) => r.id !== fire); this.persist(); this.safehouse(tab); } }); return; }
       const hire = d('hire');
-      if (hire) { const err = hireFromAd(s, hire); if (err) alert(err); this.persist(); return this.safehouse(tab); }
+      if (hire) { const err = hireFromAd(s, hire); if (err) void notice(err); this.persist(); return this.safehouse(tab); }
       const buy = d('buy') as VModel | undefined;
       if (buy && s.cash >= VEHICLES[buy].price) { s.cash -= VEHICLES[buy].price; s.cars.push(buy); this.persist(); return this.safehouse(tab); }
       const sell = d('sell');
@@ -167,7 +169,7 @@ export class App {
     $$<HTMLSelectElement>('select[data-gun]', this.screen).forEach((sel) => sel.onchange = () => {
       const r = s.roster.find((x) => x.id === sel.dataset.gun)!;
       const w = sel.value as WeaponId;
-      if (s.cash < WEAPONS[w].price) { alert('Not enough cash.'); sel.value = r.weapon; return; }
+      if (s.cash < WEAPONS[w].price) { void notice('Not enough cash.'); sel.value = r.weapon; return; }
       s.cash -= WEAPONS[w].price; r.weapon = w; this.persist(); this.safehouse(tab);
     });
   }
@@ -218,14 +220,14 @@ export class App {
     const s = this.save!;
     this.hide();
     const world = buildChapterWorld(c, s, crew);
-    if (resume) { try { world.restore(resume); } catch { localStorage.removeItem(CHAPTER_KEY); } }
-    else localStorage.removeItem(CHAPTER_KEY);
+    if (resume) { try { world.restore(resume); } catch { store.removeItem(CHAPTER_KEY); } }
+    else store.removeItem(CHAPTER_KEY);
     const saveNow = () => {
       if (world.s.result) return '';
       const hh = Math.floor(world.s.hour), mm = Math.floor((world.s.hour - hh) * 4) * 15;
       const when = `day ${world.s.day}, ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
       try {
-        localStorage.setItem(CHAPTER_KEY, JSON.stringify({ chapter: c.id, crew, when, world: world.save() } satisfies ChapterSave));
+        store.setItem(CHAPTER_KEY, JSON.stringify({ chapter: c.id, crew, when, world: world.save() } satisfies ChapterSave));
         return `Saved (${when}).`;
       } catch { return 'Could not save: the browser storage is full.'; }
     };
@@ -235,7 +237,7 @@ export class App {
       onSave: saveNow,
       onQuit: () => { saveNow(); this.game?.destroy(); this.game = null; this.title(); },
       onEnd: (won, text) => {
-        localStorage.removeItem(CHAPTER_KEY);
+        store.removeItem(CHAPTER_KEY);
         const rep = finishChapter(s, world, c);
         this.persist();
         this.game?.destroy();
@@ -280,7 +282,7 @@ export class App {
 
   // ---------- Turf War ----------
   turfMenu(err = '') {
-    const name = localStorage.getItem('bg-name') ?? '';
+    const name = store.getItem('bg-name') ?? '';
     const code = new URLSearchParams(location.search).get('room') ?? '';
     this.show(`<div class="box"><h2>Turf War</h2><div class="sub">2–4 families, one city, real time</div>
       <p>Every player runs a family with a Don, three gangsters and a car. Take businesses, open rackets, and knock out your rivals by taking their headquarters or killing their Don. You only see what your own people can see.</p>
@@ -298,7 +300,7 @@ export class App {
       if (g === 'back') { this.net?.close(); this.net = null; return this.title(); }
       if (g !== 'create' && g !== 'join') return;
       const nm = ($('#tw-name', this.screen) as HTMLInputElement).value.trim() || 'Boss';
-      localStorage.setItem('bg-name', nm);
+      store.setItem('bg-name', nm);
       try {
         if (!this.net) { this.net = new Net(); await this.net.connect(nm); this.net.on((m) => this.onNet(m)); }
         if (g === 'create') this.net.send({ t: 'create', ai: +($('#tw-ai', this.screen) as HTMLSelectElement).value, days: +($('#tw-days', this.screen) as HTMLSelectElement).value });

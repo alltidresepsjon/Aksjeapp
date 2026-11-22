@@ -1,5 +1,6 @@
 // Turf War client: sends commands, receives fog-filtered snapshots and interpolates movement.
 
+import { sessionStore } from '../ui/storage';
 import { generateMap, unpackBits, type ClientMsg, type Command, type FamId, type Layout, type MapData, type ServerMsg, type Snapshot, type ViewState } from '@bg/shared';
 import type { Session } from './Session';
 
@@ -15,14 +16,14 @@ export class Net {
       this.ws = ws;
       let ok = false;
       ws.onopen = () => {
-        const token = sessionStorage.getItem('bg-token') ?? undefined;
+        const token = sessionStore.getItem('bg-token') ?? undefined;
         ws.send(JSON.stringify({ t: 'hello', name, token } satisfies ClientMsg));
         for (const m of this.queue) ws.send(JSON.stringify(m));
         this.queue = [];
       };
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data as string) as ServerMsg;
-        if (m.t === 'welcome') { this.id = m.id; sessionStorage.setItem('bg-token', m.token); ok = true; resolve(); }
+        if (m.t === 'welcome') { this.id = m.id; sessionStore.setItem('bg-token', m.token); ok = true; resolve(); }
         for (const h of this.handlers) h(m);
       };
       ws.onerror = () => { if (!ok) reject(new Error('Could not reach the game server.')); };
