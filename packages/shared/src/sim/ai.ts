@@ -36,6 +36,7 @@ export function runAi(w: World, f: Family) {
     f.money -= HIRE_COST;
     const at = hq ? hq.door : w.edgePoint(w.rng.pick(['N', 'E'] as const));
     const u = w.addUnit(soldierInit(w.rng, f.id, f.statLo, f.statHi, s.day >= 4 && w.rng.chance(0.25) ? 'tommy' : undefined), w.jitter(at));
+    u.stance = 'defensive';
     free.push(u);
   }
   // --- side business: AI opens gambling dens in fronts ---
@@ -66,10 +67,13 @@ export function runAi(w: World, f: Family) {
   const available = () => free.filter((u) => !busy.has(u.id) && u.order.k !== 'retreat' && u.hp > u.maxHp * 0.4 &&
     !(hq && u.loc === 'inside' && u.bld === hq.id && inHq.indexOf(u) < hqGarrison));
   for (const b of own) {
-    const attackers = known.filter((t) => dist(t, b.door) < 4.5);
+    const attackers = known.filter((t) => dist(t, b.door) < 4.5 && (
+      (t.order.k === 'goto' && t.order.b === b.id && t.order.act !== 'enter') ||
+      s.time - t.lastShot < 5 ||
+      mine.some((u) => u.lastAttacker === t.id && s.time - u.lastHurt < 8)));
     const prog = Object.entries(b.prog).some(([fid, v]) => fid !== f.id && v > 3);
     if (!attackers.length && !prog) continue;
-    const need = Math.min(5, attackers.length + 1);
+    const need = f.aggression < 0.3 ? Math.min(2, attackers.length || 1) : Math.min(5, attackers.length + 1);
     const pool = available().sort((a, c) => dist(w.pos(a), b.door) - dist(w.pos(c), b.door)).slice(0, need);
     for (const u of pool) {
       busy.add(u.id);
@@ -130,7 +134,8 @@ export function runAi(w: World, f: Family) {
   }
 
   // --- lone collectors: quietly extort nearby independents by day ---
-  if (isOpen(s.hour) && w.rng.chance(0.35)) {
+  const collecting = free.some((u) => u.order.k === 'goto' && u.order.act === 'extort' && !mem!.squad.includes(u.id));
+  if (isOpen(s.hour) && !collecting && w.rng.chance(0.05 + f.aggression * 0.15)) {
     const loner = available().find((u) => u.order.k === 'idle' && u.loc === 'street' && u.stats.charm >= 2 && !mem!.squad.includes(u.id));
     const home = hq ? hq.door : own[0]?.door;
     if (loner && home) {
@@ -145,6 +150,8 @@ export function runAi(w: World, f: Family) {
       const b = own.length ? w.rng.pick(own) : null;
       if (b) w.order(u, { k: 'move', x: b.door.x + w.rng.range(-1, 1), y: b.door.y + w.rng.range(-0.5, 0.5) });
     }
+    // idle men only shoot back; squads and defenders are switched to Attack when sent
+    if (u.order.k === 'idle' && u.target < 0 && !busy.has(u.id) && !mem.squad.includes(u.id) && s.time - u.lastHurt > 10) u.stance = 'defensive';
   }
 }
 

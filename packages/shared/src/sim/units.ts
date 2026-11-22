@@ -29,12 +29,12 @@ export interface UnitInit {
 }
 
 export function maxHpFor(stats: Stats, level: number, bonus = 0): number {
-  return Math.round(60 + stats.muscle * 11 + (level - 1) * 6 + bonus);
+  return Math.round(100 + stats.muscle * 12 + (level - 1) * 8 + bonus);
 }
 
 export function makeUnit(id: number, init: UnitInit, x: number, y: number): Unit {
   const level = init.level ?? 1;
-  const hp = maxHpFor(init.stats, level, (init.hero ? 50 : 0) + (init.hpBonus ?? 0));
+  const hp = maxHpFor(init.stats, level, (init.hero ? 80 : 0) + (init.hpBonus ?? 0));
   const weapon = init.weapon ?? 'revolver';
   return {
     id, fam: init.fam, name: init.name, role: init.role, spec: init.spec ?? 'none',
@@ -55,7 +55,7 @@ export function randomStats(rng: Rng, lo: number, hi: number): Stats {
 
 export function soldierInit(rng: Rng, fam: FamId, lo: number, hi: number, weapon?: WeaponId): UnitInit {
   const stats = randomStats(rng, lo, hi);
-  const w: WeaponId = weapon ?? (rng.chance(0.25) ? rng.pick(['shotgun', 'dual', 'rifle'] as WeaponId[]) : 'revolver');
+  const w: WeaponId = weapon ?? (rng.chance(0.08 + hi * 0.04) ? rng.pick(['shotgun', 'dual', 'rifle'] as WeaponId[]) : 'revolver');
   return { fam, name: `${rng.pick(FIRST)} ${rng.pick(LAST)}`, role: 'Soldier', stats, weapon: w, level: Math.max(1, Math.floor((lo + hi) / 3)), stance: 'aggressive' };
 }
 
@@ -98,6 +98,6 @@ export function spendSkillPoint(u: { sp: number; stats: Stats; maxHp?: number },
   if (u.sp <= 0 || u.stats[stat] >= STAT_CAP) return false;
   u.sp--;
   u.stats[stat]++;
-  if (stat === 'muscle' && u.maxHp !== undefined) u.maxHp += 11;
+  if (stat === "muscle" && u.maxHp !== undefined) u.maxHp += 12;
   return true;
 }

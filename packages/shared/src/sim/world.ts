@@ -71,6 +71,14 @@ export class World {
         style: rng.int(0, 7), seed: rng.int(1, 1e9), alarm: 0,
       };
     });
+    const used = new Set<string>();
+    for (const b of buildings) {
+      let n = b.name;
+      for (let k = 0; used.has(n) && k < 12; k++) n = shopName(b.type, rng.pick(PROPRIETORS), rng.int(0, 9));
+      if (used.has(n)) n = `${b.name} (${b.street})`;
+      used.add(n);
+      b.name = n;
+    }
     const families: Record<FamId, Family> = {};
     for (const f of init.families) {
       const hq = buildings.find((b) => b.hqOf === f.id);
@@ -923,7 +931,8 @@ export class World {
     if (a.fam === b.fam) return false;
     if (b.loc === 'held' || b.loc === 'jail' || a.loc === 'held') return false;
     if (b.heldBy && b.heldBy === a.fam) return false;
-    if (a.cop) return b.heat >= HEAT_WANTED + 25 || this.s.time - (this.s.flags['copshot:' + b.fam] ?? -99) < 12 || this.s.time - (this.s.flags['copshotu:' + b.id] ?? -99) < 20;
+    // cops arrest people; they only open fire on those who shoot at police or are armed, wanted and looking for trouble
+    if (a.cop) return this.s.time - (this.s.flags['copshotu:' + b.id] ?? -99) < 20 || (b.heat >= HEAT_WANTED + 35 && b.stance === 'aggressive');
     if (b.cop) return a.lastAttacker >= 0 && this.unit(a.lastAttacker)?.cop === true && this.s.time - a.lastHurt < 6;
     return true;
   }
@@ -932,7 +941,7 @@ export class World {
     const fighters = s.units.filter((u) => (u.loc === 'street' || u.loc === 'car' || (u.loc === 'inside' && !u.task)) && !(u.heldBy && u.heldBy !== u.fam));
     for (const u of fighters) {
       if (u.reload > 0) { u.reload -= DT; if (u.reload <= 0) u.mag = WEAPONS[u.weapon].mag; }
-      u.cd -= DT;
+      u.cd = Math.max(-DT, u.cd - DT);
     }
     for (const u of fighters) {
       const w = WEAPONS[u.weapon];
@@ -980,8 +989,11 @@ export class World {
       if ((s.tick + u.id) % 8 !== 0) continue;
       const sight = this.night() ? NIGHT_SIGHT : SIGHT;
       let best: Unit | null = null, bd = sight;
+      const aiFam = !s.families[u.fam]?.human;
       for (const t of fighters) {
         if (!this.hostile(u, t) || t.cop || (t.loc === 'inside' && !this.isDefender(t))) continue;
+        // AI men do not wander off hunting: only chase intruders near their own turf, or people shooting at them
+        if (aiFam && !u.behavior && !this.engaged(t, u) && !s.buildings.some((b) => b.owner === u.fam && dist(b.door, this.pos(t)) < 5)) continue;
         const d = dist(u, this.pos(t));
         if (d < bd && d < this.detectRange(t)) { bd = d; best = t; }
       }
@@ -1015,7 +1027,7 @@ export class World {
     u.lastShot = s.time;
     u.face = tp.x - tp.y >= up.x - up.y ? 1 : -1;
     let chance = w.acc * (0.55 + u.stats.aim * 0.07) * (1 - 0.35 * (d / Math.max(1, w.range)));
-    const cover = t.loc === 'inside' ? 0.5 : t.loc === 'car' ? 0.2 : t.loc === 'street' && !t.moving ? this.pf.cover(t) : 0;
+    const cover = t.loc === 'inside' ? 0.6 : t.loc === 'car' ? 0.2 : t.loc === 'street' && !t.moving ? this.pf.cover(t) : 0;
     chance *= 1 - cover;
     if (u.moving) chance *= 0.75;
     if (u.loc === 'car') { const v = this.vehicle(u.car); if (v && v.path.length) chance *= 0.65; }
@@ -1032,7 +1044,7 @@ export class World {
     let dmg = w.dmg * (w.falloff ? 1 - 0.6 * (d / w.range) : 1) * this.rng.range(0.8, 1.2);
     if (u.boss) dmg *= 1.15;
     if (unaware && u.spec === 'hitman') dmg *= 3;
-    else if (unaware && u.stats.stealth >= 5) dmg *= 1.5;
+    else if (unaware && u.stats.stealth >= 6) dmg *= 1.3;
     if (t.loc === 'car') {
       const v = this.vehicle(t.car);
       if (v && this.rng.chance(0.6)) {

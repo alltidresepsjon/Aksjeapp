@@ -95,7 +95,7 @@ export const CHAPTERS: ChapterDef[] = [
         ['q:-,-,hq@P#hq*2!Corrado Bakery,grocer', 'q:barber,-,tailor,-', 'q:-,laundry,-,diner', 'q:garage,-,-,bakery'],
       ],
     },
-    families: [P(), { ...DOYLE, money: 200, aggression: 0.25, cap: 5, statLo: 1, statHi: 3, edge: true }],
+    families: [P(), { ...DOYLE, money: 150, aggression: 0.2, cap: 4, statLo: 1, statHi: 2, edge: true }],
     npcs: [{ fam: 'D', count: 2, at: 'doyle1' }, { fam: 'D', count: 1, at: 'doyle2' }],
     objectives: [
       { id: 'o1', text: 'Control 4 businesses on the street', def: { k: 'control', n: 4 } },
@@ -104,7 +104,7 @@ export const CHAPTERS: ChapterDef[] = [
     ],
     script: [
       { at: { day: 1, hour: 19 }, do: [{ k: 'news', text: 'Doyle men seen drinking on Kettle St, "talking about bread"', big: true }, { k: 'toast', text: 'Rumour: the Doyles will hit the bakery tonight. Get people inside it.' }] },
-      { at: { day: 1, hour: 22 }, do: [{ k: 'wave', fam: 'D', n: 4, tag: 'hq', edge: 'N' }, { k: 'toast', text: 'Doyle gunmen are coming for the bakery!' }] },
+      { at: { day: 1, hour: 22 }, do: [{ k: 'wave', fam: 'D', n: 3, tag: 'hq', edge: 'N' }, { k: 'toast', text: 'Doyle gunmen are coming for the bakery!' }] },
       { at: { day: 2, hour: 0.5 }, do: [{ k: 'wave', fam: 'D', n: 2, tag: 'hq', edge: 'E' }] },
     ],
     slots: 3, startHour: 8, gift: [], minCash: 600, bribeMult: 1, reward: 300,

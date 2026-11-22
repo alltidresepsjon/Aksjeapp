@@ -120,7 +120,7 @@ export function runScript(w: World) {
         const at = w.edgePoint(a.edge);
         const units = [];
         for (let i = 0; i < a.n; i++) {
-          const u = w.addUnit(soldierInit(w.rng, a.fam, fam.statLo, fam.statHi + 1, a.weapon), w.jitter(at, 1));
+          const u = w.addUnit(soldierInit(w.rng, a.fam, fam.statLo, fam.statHi, a.weapon), w.jitter(at, 1));
           u.behavior = { k: 'raid', tag: a.tag };
           u.stance = 'aggressive';
           u.retreat = false;
