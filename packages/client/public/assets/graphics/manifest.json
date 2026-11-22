@@ -1,14 +1,6 @@
 {
   "version": 1,
   "buildings": {
-    "club-3-1": {
-      "file": "buildings/building-club-3-1.png",
-      "w": 348,
-      "h": 394,
-      "ax": 0.4991,
-      "fw": 348,
-      "lit": "buildings/building-club-3-1-lit.png"
-    },
     "hq-3-1": {
       "file": "buildings/building-hq-3-1.png",
       "w": 348,
@@ -16,38 +8,6 @@
       "ax": 0.5,
       "fw": 348,
       "lit": "buildings/building-hq-3-1-lit.png"
-    },
-    "hq-6-1": {
-      "file": "buildings/building-hq-6-1.png",
-      "w": 732,
-      "h": 728,
-      "ax": 0.4992,
-      "fw": 732,
-      "lit": "buildings/building-hq-6-1-lit.png"
-    },
-    "shop-3-1": {
-      "file": "buildings/building-shop-3-1.png",
-      "w": 348,
-      "h": 361,
-      "ax": 0.4988,
-      "fw": 348,
-      "lit": "buildings/building-shop-3-1-lit.png"
-    },
-    "tenement-3-1": {
-      "file": "buildings/building-tenement-3-1.png",
-      "w": 348,
-      "h": 392,
-      "ax": 0.5075,
-      "fw": 348,
-      "lit": "buildings/building-tenement-3-1-lit.png"
-    },
-    "tenement-3-2": {
-      "file": "buildings/building-tenement-3-2.png",
-      "w": 369,
-      "h": 409,
-      "ax": 0.4982,
-      "fw": 348,
-      "lit": "buildings/building-tenement-3-2-lit.png"
     },
     "type-bakery-3-1": {
       "file": "buildings/building-type-bakery-3-1.png",
@@ -65,30 +25,6 @@
       "fw": 348,
       "lit": "buildings/building-type-barber-3-1-lit.png"
     },
-    "type-diner-3-1": {
-      "file": "buildings/building-type-diner-3-1.png",
-      "w": 367,
-      "h": 334,
-      "ax": 0.5,
-      "fw": 348,
-      "lit": "buildings/building-type-diner-3-1-lit.png"
-    },
-    "type-grocer-3-1": {
-      "file": "buildings/building-type-grocer-3-1.png",
-      "w": 348,
-      "h": 391,
-      "ax": 0.4996,
-      "fw": 348,
-      "lit": "buildings/building-type-grocer-3-1-lit.png"
-    },
-    "type-laundry-3-1": {
-      "file": "buildings/building-type-laundry-3-1.png",
-      "w": 348,
-      "h": 406,
-      "ax": 0.4967,
-      "fw": 348,
-      "lit": "buildings/building-type-laundry-3-1-lit.png"
-    },
     "type-pawn-3-1": {
       "file": "buildings/building-type-pawn-3-1.png",
       "w": 353,
@@ -96,14 +32,6 @@
       "ax": 0.5,
       "fw": 348,
       "lit": "buildings/building-type-pawn-3-1-lit.png"
-    },
-    "type-tailor-3-1": {
-      "file": "buildings/building-type-tailor-3-1.png",
-      "w": 348,
-      "h": 406,
-      "ax": 0.4967,
-      "fw": 348,
-      "lit": "buildings/building-type-tailor-3-1-lit.png"
     }
   },
   "people": {},
